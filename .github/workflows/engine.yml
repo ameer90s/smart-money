@@ -1,0 +1,88 @@
+name: engine
+
+# Started on time by an external trigger (cron-job.org -> workflow_dispatch) every weekday.
+# The weekday schedules below are fallbacks only: GitHub often starts scheduled runs 4-6 hours
+# late, so several early slots are used and whichever arrives first runs. One run at a time
+# (extra arrivals wait or are cancelled); a run that reaches the 6-hour limit starts the next one.
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'auto = trading day, maintenance = universe/Shariah/history refresh'
+        default: 'auto'
+      max_min:
+        description: 'Minutes before handing over to a new run'
+        default: '340'
+      until_ny:
+        description: 'Stop at New York time HH:MM'
+        default: '16:45'
+  schedule:
+    - cron: '13 7 * * 1-5'
+    - cron: '13 8 * * 1-5'
+    - cron: '13 9 * * 1-5'
+    - cron: '13 10 * * 1-5'
+    - cron: '13 12 * * 1-5'
+    - cron: '7 10 * * 6'
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: smart-money-engine
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Data branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          URL="https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git"
+          if git ls-remote --exit-code --heads "$URL" data >/dev/null 2>&1; then
+            git clone -q --depth 1 --branch data "$URL" data
+          else
+            mkdir data && cd data && git init -q -b data && git remote add origin "$URL"
+            echo "# Smart Money data" > README.md
+          fi
+
+      - name: Engine
+        env:
+          ALPACA_KEY: ${{ secrets.ALPACA_KEY }}
+          ALPACA_SECRET: ${{ secrets.ALPACA_SECRET }}
+          FINNHUB_KEY: ${{ secrets.FINNHUB_KEY }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          GIST_ID: ${{ secrets.GIST_ID }}
+          GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          APP_URL: ${{ vars.APP_URL }}
+          DATA_DIR: data
+          GIT_SYNC: '1'
+          RUNNER_NAME: github-actions
+          REASON_FILE: /tmp/engine_reason
+          MODE: ${{ github.event.inputs.mode || (github.event.schedule == '7 10 * * 6' && 'maintenance') || 'auto' }}
+          MAX_MIN: ${{ github.event.inputs.max_min || '340' }}
+          UNTIL_NY: ${{ github.event.inputs.until_ny || '16:45' }}
+        run: node engine/main.js
+
+      - name: Hand over when the time cap was reached
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          R=$(cat /tmp/engine_reason 2>/dev/null || echo none)
+          echo "engine end reason: $R"
+          if [ "$R" = "max" ]; then
+            gh workflow run engine.yml -R "$REPO" -f mode=auto -f max_min=340 -f until_ny=16:45 || true
+          fi
