@@ -70,7 +70,15 @@ export function markReplayed(day, sym) {
     for (const k of keys) if (k.slice(0, 10) < cutoff) delete m.replayed[k];
   }
 }
-export function backtestDays() { return [...new Set(load().samples.filter((s) => s.src === 'backtest').map((s) => s.day))].sort(); }
+// Remove every sample from one source (used to retire the earlier hindsight-selected replay).
+export function dropSource(src) {
+  const m = load();
+  const before = m.samples.length;
+  m.samples = m.samples.filter((s) => s.src !== src);
+  IDX = new Set(m.samples.filter((s) => s.day && s.sym).map(keyOf));
+  recount(m);
+  return before - m.samples.length;
+}
 
 function rate(list, r, prior) {
   const hits = list.reduce((a, s) => a + (s.mfe >= r ? 1 : 0), 0);

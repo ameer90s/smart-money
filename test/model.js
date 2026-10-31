@@ -42,22 +42,27 @@ try {
     assert.equal(model.load().sources.live, 1);
   });
 
-  const universe = {
-    movers: { '2026-10-26': ['NOVX', 'HLXA', 'KRNA', 'BANKX'], '2026-10-27': ['NOVX', 'HLXA'] },
-    symbols: [{ s: 'NOVX', adv: 5e7 }, { s: 'HLXA', adv: 3e7 }, { s: 'KRNA', adv: 2e7 }, { s: 'BANKX', adv: 9e7 }],
-  };
+  // Walk-forward replay of one past session on the mock market (its calendar has one day).
+  const universe = { symbols: ['NOVX', 'HLXA', 'KRNA', 'ORBT', 'SUNQ', 'BANKX'].map((s, i) => ({ s, adv: [5e7, 3e7, 2e7, 4e7, 2e7, 9e7][i] })) };
+  for (const s of ['ORBT', 'SUNQ']) fs.writeFileSync(path.join(dir, 'shariah.json'), JSON.stringify({ ...JSON.parse(fs.readFileSync(path.join(dir, 'shariah.json'), 'utf8')), [s]: { st: 'ok', at } }));
   let first = 0;
-  await t('full replay covers every compliant stock-day once', async () => {
-    first = await bootstrap(universe, DEFAULTS, { days: 5, perDay: 10, budgetMs: 120000 });
-    for (const [d, syms] of Object.entries(universe.movers)) for (const s of syms) assert.equal(model.wasReplayed(d, s), s !== 'BANKX', `${d} ${s}`);
-    const keys = model.load().samples.filter((s) => s.day && s.sym).map((s) => `${s.src}|${s.day}|${s.sym}|${s.setup}`);
+  await t('walk-forward replay: live funnel, no hindsight, retires old samples', async () => {
+    first = await bootstrap(universe, DEFAULTS, { days: 5, budgetMs: 120000, minReplay: 1 });
+    assert.ok(model.wasReplayed('2026-10-28', '*'));
+    const S = model.load().samples;
+    const rep = S.filter((s) => s.src === 'replay');
+    assert.ok(rep.length >= 1, 'replay produced signals');
+    assert.ok(rep.every((s) => s.sym !== 'BANKX'), 'non-compliant stock never replayed');
+    assert.ok(rep.every((s) => s.day === '2026-10-28' && ['lo', 'mid', 'hi'].includes(s.score)));
+    assert.equal(S.filter((s) => s.src === 'backtest').length, 0, 'hindsight samples retired');
+    const keys = S.filter((s) => s.day && s.sym).map((s) => `${s.src}|${s.day}|${s.sym}|${s.setup}`);
     assert.equal(new Set(keys).size, keys.length);
   });
 
   await t('a second replay is incremental: no new requests, no new samples', async () => {
     const before = await feeds();
     const size = model.load().samples.length;
-    const second = await bootstrap(universe, DEFAULTS, { days: 5, perDay: 10, budgetMs: 120000 });
+    const second = await bootstrap(universe, DEFAULTS, { days: 5, budgetMs: 120000, minReplay: 1 });
     const after = await feeds();
     assert.equal(second, 0);
     assert.equal(model.load().samples.length, size);
@@ -66,7 +71,7 @@ try {
 
   await t('replay state survives a save', () => {
     const saved = JSON.parse(fs.readFileSync(path.join(dir, 'model.json'), 'utf8'));
-    assert.ok(saved.replayed['2026-10-27|HLXA']);
+    assert.ok(saved.replayed['2026-10-28|*']);
     assert.equal(saved.samples.length, model.load().samples.length);
   });
   await t('AI proposals carry a reason and an effect, and are never applied by themselves', async () => {
@@ -78,7 +83,7 @@ try {
     assert.ok(p.why && /حالة|حالات/.test(p.why) && p.effect);
     assert.ok(rep.proposals.every((x) => !('status' in x) || x.status === 'new'));
   });
-  console.log(`(first replay added ${first} historical signals)`);
+  console.log(`(replay added ${first} signals: ${model.load().samples.filter((x) => x.src === 'replay').map((x) => `${x.sym}/${x.setup}`).join(', ')})`);
 } finally {
   mock.kill();
 }

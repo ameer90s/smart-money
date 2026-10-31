@@ -172,7 +172,7 @@ async function prepare(day) {
   // Quick replay before the open only when the model is nearly empty; the full one runs in maintenance.
   if (model.load().samples.length < 150 && !flagDone(`btq-${day}`)) {
     setFlag(`btq-${day}`);
-    try { await bootstrap(u, cfg, { budgetMs: Math.max(60000, Math.min(nyToUtc(day, '09:28') - now(), 20 * 60000)) }); } catch (e) { warn('bootstrap', e); }
+    try { await bootstrap(u, cfg, { days: 10, budgetMs: Math.max(60000, Math.min(nyToUtc(day, '09:28') - now(), 20 * 60000)) }); } catch (e) { warn('bootstrap', e); }
   }
   let week = loadWeek(day);
   if (!week) { try { week = await buildWeek(day, tradable(u, true).map((x) => x.s)); } catch (e) { warn('week', e); } }
@@ -357,7 +357,7 @@ async function maintenance(day) {
   if (u) {
     await screenUniverse(u, 60 * 60000);
     // Full replay: incremental (already-replayed stock-days are skipped), so it can run every maintenance.
-    if (!flagDone(`btfull-${day}`)) { setFlag(`btfull-${day}`); try { await bootstrap(u, cfg, { days: 45, perDay: 30, budgetMs: 60 * 60000 }); } catch (e) { warn('bootstrap', e); } }
+    if (!flagDone(`replay-${day}`)) { setFlag(`replay-${day}`); try { await bootstrap(u, cfg, { days: 45, budgetMs: 60 * 60000 }); } catch (e) { warn('bootstrap', e); } }
     if (!flagDone(`week-${day}`) && ['Sat', 'Sun'].includes(ny().dow)) { setFlag(`week-${day}`); try { await buildWeek(addDays(day, ny().dow === 'Sat' ? 2 : 1), tradable(u, true).map((x) => x.s)); } catch (e) { warn('week', e); } }
   }
   rt.mkt = await marketContext();
