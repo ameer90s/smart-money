@@ -104,6 +104,23 @@ t('intraday volume curve and 5-minute aggregation', () => {
   assert.equal(b5.length, Math.ceil(bars.length / 5));
 });
 
+t('dip plan: stop at least 1 ATR, one target at 1.5R, sell everything there', () => {
+  const ctx = buildCtx(bars, open, { pdh: 21, atrD: 1 });
+  const setup = { type: 'DIP', label: 'dip', trigger: ctx.last.h + 0.01, stopStruct: ctx.last.h - 0.02, ext: -2 };
+  const p = plan(setup, ctx, { spread: 0.01 }, DEFAULTS, { score: 60, regime: 'down' });
+  assert.equal(p.exit, 'full');
+  assert.ok(p.R >= ctx.a5 - 0.001, 'stop floor 1 ATR (plan values are rounded)');
+  assert.ok(Math.abs(p.targets[0].r - 1.5) < 0.01);
+  const b0 = Date.parse('2026-11-02T15:00:00Z');
+  const pl = { entry: 10, stop: 9.8, R: 0.2, exit: 'full', targets: [{ price: 10.3 }, { price: 10.4 }, { price: 10.6 }] };
+  const up = [[10, 10.1, 9.95, 10.05], [10.05, 10.31, 10.0, 10.3], [10.3, 10.7, 10.2, 10.6]].map(([o, h, l, c], i) => ({ t: new Date(b0 + i * 60000).toISOString(), o, h, l, c, v: 1 }));
+  const r = simulate(up, b0, pl, {});
+  assert.equal(r.reason, 't1'); assert.ok(Math.abs(r.r - 1.5) < 1e-9);
+  const flat = Array.from({ length: 70 }, (_, i) => ({ t: new Date(b0 + i * 60000).toISOString(), o: 10.05, h: 10.1, l: 9.9, c: 10.05, v: 1 }));
+  const r2 = simulate(flat, b0, pl, { timeStopMin: 60 });
+  assert.equal(r2.reason, 'timestop'); assert.ok(Math.abs(r2.r - 0.25) < 1e-9);
+});
+
 t('spread: liquidity estimate caps a wide IEX quote, a tight quote wins', () => {
   assert.equal(estSpread(315.8, 300e6), 0.1);       // 3 bps, rounded up to the cent
   assert.equal(effectiveSpread(315.8, 5.17, 300e6), 0.1); // the FDX case from 30 Oct

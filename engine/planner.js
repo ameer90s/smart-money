@@ -19,7 +19,8 @@ export function plan(setup, ctx, q, cfg, feats = {}) {
   let stop = setup.stopStruct;
   let R = entry - stop;
   const spread = Math.max(0.01, q.spread || 0.01);
-  const minR = Math.max(cfg.stopAtrMin * a, 2 * spread, entry * 0.0025);
+  const minAtr = (cfg.stopAtrMinBy && cfg.stopAtrMinBy[setup.type]) || cfg.stopAtrMin;
+  const minR = Math.max(minAtr * a, 2 * spread, entry * 0.0025);
   if (R < minR) { R = minR; stop = entry - R; }
   if (R > cfg.stopAtrMax * a) fails.push('stop');            // structure too far away
   if (spread / entry * 100 > cfg.spreadMaxPct || spread / R > cfg.spreadMaxR) fails.push('spread');
@@ -42,12 +43,21 @@ export function plan(setup, ctx, q, cfg, feats = {}) {
     const c = lv.find((x) => x.p >= entry + loR * R && x.p <= entry + hiR * R);
     return c ? { p: c.p, why: c.why } : { p: entry + fallbackR * R, why: fallbackWhy };
   };
-  const minT1 = cfg.rrMinNet + costR;
-  const t1 = pick(minT1, Math.max(minT1 + 1.2, 3), minT1, 'مضاعف المخاطرة');
-  const r1 = (t1.p - entry) / R;
-  const t2 = pick(r1 + 0.8, 5, Math.max(2.5, r1 + 1), 'مضاعف المخاطرة');
-  const r2 = (t2.p - entry) / R;
-  const t3 = pick(r2 + 1, 7, Math.max(4, r2 + 1.5), 'امتداد ATR');
+  // Fixed single target (sell everything at k·R), as tested in the lab; T2/T3 are shown for information.
+  const fixedK = cfg.fixedR && cfg.fixedR[setup.type];
+  let t1, t2, t3;
+  if (fixedK) {
+    t1 = { p: entry + fixedK * R, why: `هدف ثابت ${fixedK}R (بيع كامل)` };
+    t2 = { p: entry + (fixedK + 0.5) * R, why: 'مستوى أعلى · للمعلومة' };
+    t3 = { p: entry + (fixedK + 1.5) * R, why: 'مستوى أعلى · للمعلومة' };
+  } else {
+    const minT1 = cfg.rrMinNet + costR;
+    t1 = pick(minT1, Math.max(minT1 + 1.2, 3), minT1, 'مضاعف المخاطرة');
+    const r1 = (t1.p - entry) / R;
+    t2 = pick(r1 + 0.8, 5, Math.max(2.5, r1 + 1), 'مضاعف المخاطرة');
+    const r2 = (t2.p - entry) / R;
+    t3 = pick(r2 + 1, 7, Math.max(4, r2 + 1.5), 'امتداد ATR');
+  }
 
   const fe = { score: model.scoreBucket(feats.score || 0), tod: model.todBucket(ctx.minAfterOpen), regime: feats.regime };
   const targets = [t1, t2, t3].map((t, i) => {
@@ -61,17 +71,30 @@ export function plan(setup, ctx, q, cfg, feats = {}) {
       ev: round(pr.p * netR - (1 - pr.p) * (1 + costR)),
     };
   });
-  const best = targets.reduce((b, t) => (t.ev > b.ev ? t : b), targets[0]);
-  if (targets[0].netR < cfg.rrMinNet) fails.push('rr');
-  if ((t1.p - entry) < cfg.costMult * costPerShare) fails.push('cost');
-  if (targets[0].prob < cfg.probMinT1) fails.push('prob');
-  if (best.ev < cfg.evMin) fails.push('ev');
+  let best = targets.reduce((b, t) => (t.ev > b.ev ? t : b), targets[0]);
+  if (fixedK) {
+    // One exit at k·R: break-even win rate is 1/(1+k) before costs. Trial week judges the edge
+    // before fees (they are still charged in the result); otherwise after fees.
+    best = targets[0];
+    const p1 = targets[0].prob;
+    const evGross = p1 * fixedK - (1 - p1);
+    const ev = cfg.trialGross ? evGross : targets[0].ev;
+    targets[0].evGross = round(evGross, 3);
+    if ((t1.p - entry) < cfg.costMult * costPerShare) fails.push('cost');
+    if (p1 < 1 / (1 + fixedK) + 0.02) fails.push('prob');
+    if (ev < 0.05) fails.push('ev');
+  } else {
+    if (targets[0].netR < cfg.rrMinNet) fails.push('rr');
+    if ((t1.p - entry) < cfg.costMult * costPerShare) fails.push('cost');
+    if (targets[0].prob < cfg.probMinT1) fails.push('prob');
+    if (best.ev < cfg.evMin) fails.push('ev');
+  }
 
   return {
     setup: setup.type, label: setup.label,
     entry: round(entry), maxBuy: round(entry + 0.2 * R), stop: round(stop), R: round(R, 3),
     rPct: round((R / entry) * 100), atr5: round(a, 3), stopAtr: round(R / a),
-    targets, expected: best.k, ev: best.ev,
+    targets, expected: best.k, ev: fixedK && cfg.trialGross ? targets[0].evGross : best.ev, exit: fixedK ? 'full' : 'scale',
     stopProb: round(1 - targets[0].prob, 3),
     sizing: { shares, cost: round(shares * entry), riskUsd: round(shares * R + fees), fees },
     costR: round(costR, 3), spread: round(spread, 4), ext: round(setup.ext),

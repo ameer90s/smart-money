@@ -2,8 +2,8 @@
 // in the app's settings is merged on top of these at runtime (see live.js).
 import path from 'node:path';
 
-export const VERSION = 'S1.2';
-export const APP_VERSION = '1.2.0';
+export const VERSION = 'S1.3';
+export const APP_VERSION = '1.3.0';
 
 export const DEFAULTS = {
   capital: 1000,          // virtual account, USD
@@ -34,6 +34,12 @@ export const DEFAULTS = {
   spreadMaxR: 0.15,
   confirmSec: 20,         // price must hold above the trigger this long
   timeStopMin: 60,
+  // S1.3 — from the walk-forward lab (31 Oct): only the dip setup showed an edge before costs.
+  recSetups: ['DIP'],          // setups that may become recommendations; the rest are logged and audited only
+  fixedR: { DIP: 1.5 },        // single target at k·R, sell everything there (as tested in the lab)
+  stopAtrMinBy: { DIP: 1.0 },  // per-setup minimum stop distance in 5-minute ATRs
+  trialGross: true,            // trial week: probability/value gates before fees (fees still shown and charged)
+  inplayMax: 20,               // names kept on the stream after leaving the watchlist (for the dip setup)
   allowDoubtful: false,
   useNews: true,
   notifyRec: true,

@@ -10,6 +10,7 @@ export const SETUP_LABELS = {
   PMH: 'اختراق أعلى ما قبل الافتتاح',
   PDH: 'اختراق أعلى اليوم السابق',
   EMA: 'أول ارتداد EMA9',
+  DIP: 'شراء الهبوط بعد انعكاس',
 };
 
 // bars: today's 1-minute bars (pre-market included), openMs: today's 09:30 in epoch ms.
@@ -119,6 +120,12 @@ export function detect(ctx) {
     if (e9 > e20 && push >= 1.5 * a && last.l <= e9 + 0.1 * a && last.c >= e20 && last.c >= vwap) {
       add('EMA', last.h + tick(last.h), Math.min(lowest(rth, 3), e20) - 0.05 * a);
     }
+  }
+
+  // 6. Sharp dip: at least 1.5 ATR below VWAP, then a green bar closing above the prior high.
+  //    The only setup that held an edge before costs in the walk-forward lab (S1.3).
+  if (n >= 20 && last.c <= vwap - 1.5 * a && last.c > last.o && last.c > rth[n - 2].h) {
+    add('DIP', last.h + tick(last.h), lowest(rth, 5) - 0.1 * a, { dv: (vwap - last.c) / a });
   }
   return out;
 }

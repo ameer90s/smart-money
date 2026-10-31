@@ -63,7 +63,9 @@ export class Recs {
     if (this.cfg.notifyRec) {
       notify({
         title: `توصية شراء ${rec.sym} · ${plan.label}`,
-        message: `دخول ${fmt(plan.entry)} (حتى ${fmt(plan.maxBuy)}) · وقف ${fmt(plan.stop)}\nأهداف ${fmt(T[0].price)} (${Math.round(T[0].prob * 100)}%) · ${fmt(T[1].price)} (${Math.round(T[1].prob * 100)}%) · ${fmt(T[2].price)} (${Math.round(T[2].prob * 100)}%)`,
+        message: plan.exit === 'full'
+          ? `دخول ${fmt(plan.entry)} (حتى ${fmt(plan.maxBuy)}) · وقف ${fmt(plan.stop)}\nالهدف ${fmt(T[0].price)} بيع كامل (${Math.round(T[0].prob * 100)}%) · خروج زمني بعد ${this.cfg.timeStopMin} د`
+          : `دخول ${fmt(plan.entry)} (حتى ${fmt(plan.maxBuy)}) · وقف ${fmt(plan.stop)}\nأهداف ${fmt(T[0].price)} (${Math.round(T[0].prob * 100)}%) · ${fmt(T[1].price)} (${Math.round(T[1].prob * 100)}%) · ${fmt(T[2].price)} (${Math.round(T[2].prob * 100)}%)`,
         priority: 5, tags: ['chart_with_upwards_trend'], click: ENV.appUrl ? `${ENV.appUrl}#rec=${encodeURIComponent(rec.id)}` : undefined,
       });
     }
@@ -72,9 +74,9 @@ export class Recs {
 
   closeRec(r, p, reason, t) {
     const sh = r.plan.sizing.shares;
-    const half = r.t1 ? sh / 2 : 0;
+    const half = r.t1 && !r.full ? sh / 2 : 0;
     const rest = sh - half;
-    const gross = (r.t1 ? half * (r.plan.targets[0].price - r.plan.entry) : 0) + rest * (p - r.plan.entry);
+    const gross = (half ? half * (r.plan.targets[0].price - r.plan.entry) : 0) + rest * (p - r.plan.entry);
     const net = gross - r.plan.sizing.fees;
     const rMult = (gross / sh) / r.plan.R;
     r.status = 'closed';
@@ -94,6 +96,11 @@ export class Recs {
       const P = r.plan, T = P.targets;
       r.last = p; r.maxP = Math.max(r.maxP, p); r.minP = Math.min(r.minP, p);
       if (p <= r.stopNow) { this.closeRec(r, r.stopNow, r.t1 ? 'وقف على التعادل' : 'ضرب الوقف', t); continue; }
+      if (P.exit === 'full') { // single target: sell everything there; time stop regardless of price
+        if (p >= T[0].price) { r.t1 = true; r.full = true; this.closeRec(r, T[0].price, 'وصل الهدف ✓ (بيع كامل)', t); continue; }
+        if ((t - r.firedAt) / 60000 >= this.cfg.timeStopMin) this.closeRec(r, p, 'خروج زمني', t);
+        continue;
+      }
       if (!r.t1 && p >= T[0].price) {
         r.t1 = true; r.stopNow = P.entry;
         r.timeline.push({ t, what: 'وصل الهدف 1', note: `بيع النصف · الوقف رُفع إلى ${fmt(P.entry)} (التعادل)` });
@@ -132,7 +139,8 @@ function ctxSnap(c) {
 function reasonsOf(it, plan, f, market) {
   const out = [];
   if (f.rvol != null) out.push({ k: 'الحجم النسبي لهذا الوقت', v: `×${f.rvol.toFixed(1)}`, good: f.rvol >= 2 });
-  out.push({ k: 'البعد عن VWAP', v: `${plan.ext.toFixed(1)} ATR`, good: plan.ext <= 1.2 });
+  if (plan.setup === 'DIP') out.push({ k: 'الهبوط تحت VWAP', v: `${(-plan.ext).toFixed(1)} ATR · شمعة انعكاس`, good: true });
+  else out.push({ k: 'البعد عن VWAP', v: `${plan.ext.toFixed(1)} ATR`, good: plan.ext <= 1.2 });
   out.push({ k: 'الوقف', v: `${plan.stopAtr.toFixed(1)} × ATR 5د`, good: true });
   if (market) out.push({ k: 'السوق SPY', v: `${market.spy.chg >= 0 ? '+' : ''}${market.spy.chg}% · ${market.spy.above ? 'فوق' : 'تحت'} VWAP`, good: market.regime !== 'down' });
   if (market && market.sectors && it.sector && market.sectors[it.sector] != null) out.push({ k: `القطاع ${it.sector}`, v: `${market.sectors[it.sector] >= 0 ? '+' : ''}${market.sectors[it.sector]}% مقابل SPY`, good: market.sectors[it.sector] >= 0 });

@@ -119,7 +119,7 @@ function buildLive() {
     session: rt.sess ? { day, open: rt.sess.open, close: rt.sess.close } : { day, open: null, close: null },
     market: rt.mkt ? { ...rt.mkt, regimeAr: REGIME_AR[rt.mkt.regime] } : null,
     universe: { liquid: u ? u.liquid : 0, counts, tradable: counts.ok + (cfg.allowDoubtful ? counts.doubt : 0), builtDay: u ? u.day : null },
-    funnel: { universe: counts.ok, scanned: rt.scanned, active: rt.active, candidates: rt.cands, watch: wl ? wl.items.size : 0, recs: todayRecs.length },
+    funnel: { universe: counts.ok, scanned: rt.scanned, active: rt.active, candidates: rt.cands, watch: wl ? wl.items.size : 0, inplay: wl ? wl.inplay.size : 0, recs: todayRecs.length },
     pre: rt.pre.slice(0, 12),
     watch: wl ? wl.view(regime, new Set(todayRecs.filter((r) => r.status === 'active').map((r) => r.sym))) : [],
     exited: wl ? wl.exited.slice(-10).map((x) => ({ ...x, atNy: ny(x.at).hm })) : [],
@@ -221,7 +221,10 @@ async function runDay(day, sess) {
       const p = makePlan(setup, it.ctx, { spread: it.spread }, eff, { score: it.score, regime });
       const why = [...p.fails, ...recs.guard(it.sym, eff)];
       if ((R.earningsToday || []).includes(it.sym)) why.push('earnings');
-      if (regime === 'down' && p.targets[0].prob < eff.probMinT1 + 0.1) why.push('market');
+      // The dip setup did best on down days in the lab, so the down-market rule applies to the others only.
+      if (p.exit !== 'full' && regime === 'down' && p.targets[0].prob < eff.probMinT1 + 0.1) why.push('market');
+      // Setups without a proven edge are logged and audited (to keep learning) but never recommended.
+      if (cfg.recSetups && !cfg.recSetups.includes(setup.type)) why.push('shadow');
       if (R.halfSizeUntil && ny(t).min < hmToMin(R.halfSizeUntil)) {
         p.sizing.shares = Math.floor((p.sizing.shares / 2) * 100) / 100;
         p.sizing.cost = +(p.sizing.shares * p.entry).toFixed(2);
@@ -325,7 +328,7 @@ async function runDay(day, sess) {
 
   // Flat before the bell.
   rt.phase = 'closing';
-  const priceOf = (sym) => { const it = wl.items.get(sym); return it ? it.last : null; };
+  const priceOf = (sym) => { const it = wl.get(sym); return it ? it.last : null; };
   recs.flatten(priceOf, now());
   stream.set([]);
   while (now() < closeMs) { const st = shouldStop(); if (st) exitWith(st); await publishLive(); await sleep(15000); }
@@ -358,7 +361,7 @@ async function maintenance(day) {
   if (u) {
     await screenUniverse(u, 60 * 60000);
     // Full replay: incremental (already-replayed stock-days are skipped), so it can run every maintenance.
-    if (!flagDone(`replay-${day}`)) { setFlag(`replay-${day}`); try { await bootstrap(u, cfg, { days: 45, budgetMs: 60 * 60000 }); } catch (e) { warn('bootstrap', e); } }
+    if (!flagDone(`replay2-${day}`)) { setFlag(`replay2-${day}`); try { await bootstrap(u, cfg, { days: 45, budgetMs: 60 * 60000 }); } catch (e) { warn('bootstrap', e); } }
     if (!flagDone(`week-${day}`) && ['Sat', 'Sun'].includes(ny().dow)) { setFlag(`week-${day}`); try { await buildWeek(addDays(day, ny().dow === 'Sat' ? 2 : 1), tradable(u, true).map((x) => x.s)); } catch (e) { warn('week', e); } }
   }
   rt.mkt = await marketContext();

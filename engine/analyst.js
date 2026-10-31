@@ -1,14 +1,14 @@
 // Daily analyst: classifies why trades lost, finds missed opportunities, and proposes changes
 // in any area (discovery, entry, stop, targets, timing, setups) with a what-if from recorded
 // signals. Rule-based by default; adds a written report from Claude when a key is configured.
-import { ENV } from './config.js';
+import { ENV, DEFAULTS } from './config.js';
 import { request } from './http.js';
 import { readJSON, writeJSON, dayRel, listDays } from './store.js';
 import * as model from './model.js';
 import { warn } from './log.js';
 
 const CAUSE_AR = { noise: 'وقف داخل ضجيج السهم', ext: 'دخول ممتد بعد دفعة', market: 'السوق انعكس', late: 'اكتشاف متأخر', spread: 'سيولة أو سبريد', time: 'لم يتحرك (خروج بالوقت)', other: 'أخرى' };
-const FAIL_AR = { prob: 'الاحتمال', ev: 'القيمة المتوقعة', rr: 'العائد للمخاطرة', cost: 'التكلفة', stop: 'وقف بعيد', spread: 'السبريد', ext: 'الامتداد', window: 'خارج الوقت', max: 'الحد اليومي', dailyLoss: 'حد الخسارة', cooldown: 'التهدئة', dup: 'تكرار', earnings: 'يوم أرباح', market: 'السوق هابط' };
+const FAIL_AR = { prob: 'الاحتمال', ev: 'القيمة المتوقعة', rr: 'العائد للمخاطرة', cost: 'التكلفة', stop: 'وقف بعيد', spread: 'السبريد', ext: 'الامتداد', window: 'خارج الوقت', max: 'الحد اليومي', dailyLoss: 'حد الخسارة', cooldown: 'التهدئة', dup: 'تكرار', earnings: 'يوم أرباح', market: 'السوق هابط', shadow: 'نمط للمراقبة فقط' };
 
 // Arabic counted nouns: 3–10 take the plural, 11 and up the singular.
 const cn = (k, plural, singular) => `${k} ${k >= 3 && k <= 10 ? plural : singular}`;
@@ -71,7 +71,7 @@ export function rulesReport(day) {
     props.push({ id: `relax-${f}`, aspect: f === 'window' ? 'التوقيت' : f === 'prob' || f === 'ev' ? 'الاحتمال' : 'الاكتشاف', text: `راجع شرط «${FAIL_AR[f] || f}»: رفض ${cn(xs.length, 'فرص', 'فرصة')} وصلت الهدف 1`, why: `الشرط رفض ${cn(xs.length, 'إشارات', 'إشارة')}، ولما أعدت تشغيلها على البيانات الكاملة وصلت الهدف 1، ومتوسطها ${avgR(xs).toFixed(2)}R`, effect: `تخفيف هالشرط يزيد التوصيات. نحتاج نتأكد إنه ما يدخل صفقات خاسرة أكثر من الفرص اللي يكسبها` });
   }
   const per = model.perSetup();
-  for (const [s, o] of Object.entries(per)) if (o.n >= 15 && o.t15 < 0.3) props.push({ id: `pause-${s}`, aspect: 'النمط', text: `أوقف نمط ${s} مؤقتاً`, why: `وصل 1.5R في ${Math.round(o.t15 * 100)}% بس من ${cn(o.n, 'حالات', 'حالة')}، والنمط اللي ما عنده أي ميزة يوصل تقريباً 40%`, effect: 'ما يطلع توصيات من هالنمط. حالياً هو أصلاً تحت حد الثقة 45%، فالإيقاف يثبّت الوضع لين تتحسن أرقامه' });
+  for (const [s, o] of Object.entries(per)) if (o.n >= 15 && o.t15 < 0.3 && (DEFAULTS.recSetups || []).includes(s)) props.push({ id: `pause-${s}`, aspect: 'النمط', text: `أوقف نمط ${s} مؤقتاً`, why: `وصل 1.5R في ${Math.round(o.t15 * 100)}% بس من ${cn(o.n, 'حالات', 'حالة')}، والنمط اللي ما عنده أي ميزة يوصل تقريباً 40%`, effect: 'ما يطلع توصيات من هالنمط. حالياً هو أصلاً تحت حد الثقة 45%، فالإيقاف يثبّت الوضع لين تتحسن أرقامه' });
   const byTod = {};
   for (const s of audited) (byTod[model.todBucket(s.minAfterOpen || 60)] = byTod[model.todBucket(s.minAfterOpen || 60)] || []).push(s);
   const TOD_AR = { open: 'أول 30 دقيقة', morning: 'الصباح', midday: 'منتصف اليوم', late: 'آخر الجلسة' };

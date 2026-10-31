@@ -23,7 +23,7 @@ const env = {
 
 // Seed the model so the test exercises issuing (on a real server the historical replay does this).
 const samples = [];
-for (const setup of ['ORB15', 'ORB5', 'VWAP', 'FLAG', 'PMH', 'PDH', 'EMA']) for (let i = 0; i < 60; i++) samples.push({ setup, mfe: [0.3, 0.8, 1.6, 2.1, 2.6, 3.4, 1.8, 4.2, 0.5, 2.0][i % 10], score: 'mid', tod: 'morning', regime: 'flat', src: 'seed' });
+for (const setup of ['ORB15', 'ORB5', 'VWAP', 'FLAG', 'PMH', 'PDH', 'EMA', 'DIP']) for (let i = 0; i < 60; i++) samples.push({ setup, mfe: [0.3, 0.8, 1.6, 2.1, 2.6, 3.4, 1.8, 4.2, 0.5, 2.0][i % 10], score: 'mid', tod: 'morning', regime: 'flat', src: 'seed' });
 fs.writeFileSync(path.join(dataDir, 'model.json'), JSON.stringify({ v: 1, samples, calib: [], trainedAt: 0, sources: { seed: samples.length } }));
 
 const mock = spawn(process.execPath, ['test/mock.js'], { env, stdio: ['ignore', 'pipe', 'inherit'] });
@@ -58,6 +58,9 @@ const checks = [
   ['scanner minute log written', scanner.length >= 10],
   ['each record tagged with strategy version', recs.every((r) => r.version) && signals.every((s) => s.version)],
   ['history uses consolidated (SIP) bars', (cap.feeds.sip || 0) > 0],
+  ['only the proven setup is recommended (dip)', recs.length >= 1 && recs.every((r) => r.setup === 'DIP')],
+  ['other setups are logged and audited as shadow', signals.some((s) => (s.why || []).includes('shadow'))],
+  ['dip plan: single target, sell everything there', recs.every((r) => r.plan.exit === 'full' && Math.abs(r.plan.targets[0].r - 1.5) < 0.01 && r.plan.stopAtr >= 0.99)],
   ['never asks for SIP newer than 15 minutes', cap.sipRecent === 0],
   ['wide IEX quote does not inflate the spread', signals.every((s) => s.plan.spread <= 0.1) && recs.every((r) => r.plan.spread <= 0.1)],
 ];

@@ -120,6 +120,10 @@ export function replayWatched({ sym, day, bars, spy, spyPc, cfg, dc, adv, window
   const flatMs = Math.min(nyToUtc(day, cfg.flatAt), nyToUtc(day, sess.close) - 5 * 60000);
   const fromMs = nyToUtc(day, cfg.recFrom);
   const inWin = (t) => windows.some(([a, b]) => t >= a && t < b);
+  // Like live: once a name has been on the watchlist it stays in play for the rest of the day,
+  // but only the recommendable setups (cfg.recSetups) are looked for outside the watch windows.
+  const inplayFrom = windows.length ? windows[0][0] : Infinity;
+  const recSet = new Set(cfg.recSetups || []);
   const used = new Set();
   const out = [];
   const first = bars.findIndex((b) => ms(b.t) >= openMs);
@@ -127,10 +131,12 @@ export function replayWatched({ sym, day, bars, spy, spyPc, cfg, dc, adv, window
   for (let i = first + 2; i < bars.length - 1; i++) {
     const t = ms(bars[i].t);
     if (t >= toMs) break;
-    if (t + 60000 < fromMs || !inWin(t + 60000)) continue;
+    const tc = t + 60000;
+    const inW = inWin(tc);
+    if (tc < fromMs || (!inW && !(recSet.size && tc >= inplayFrom))) continue;
     const ctx = buildCtx(bars.slice(0, i + 1), openMs, { pdh: dc.pdh, atrD: dc.atrD });
     for (const s of detect(ctx)) {
-      if (used.has(s.type)) continue;
+      if (used.has(s.type) || (!inW && !recSet.has(s.type))) continue;
       const R0 = s.trigger - s.stopStruct;
       for (let j = i + 1; j <= Math.min(i + 3, bars.length - 1); j++) {
         const b = bars[j];
@@ -217,7 +223,8 @@ export async function bootstrap(universe, cfg, { days = 45, budgetMs = 50 * 6000
   let cal = [];
   try { cal = await alpaca.calendar(addDays(today, -Math.ceil(days * 1.6) - 7), addDays(today, -1)); } catch (e) { warn('replay calendar', e); }
   const sessions = cal.filter((c) => c.date < today).slice(-days).reverse(); // newest first
-  const todo = sessions.filter((c) => !model.wasReplayed(c.date, '*'));
+  // '*2': replay version 2 (S1.3 adds the dip setup and in-play names), so earlier sessions are replayed again.
+  const todo = sessions.filter((c) => !model.wasReplayed(c.date, '*2'));
   let total = 0, done = 0;
   if (todo.length && syms.length) {
     const oldest = todo[todo.length - 1].date;
@@ -229,7 +236,7 @@ export async function bootstrap(universe, cfg, { days = 45, budgetMs = 50 * 6000
       try {
         const r = await replayDay(sess, { syms, daily, advOf, cfg });
         total += r.samples; done++;
-        model.markReplayed(sess.date, '*');
+        model.markReplayed(sess.date, '*2');
         log(`replay ${sess.date}: ${r.watched} watched, ${r.samples} signals`);
       } catch (e) { warn(`replay ${sess.date}`, e); }
     }

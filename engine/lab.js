@@ -156,6 +156,7 @@ async function labDay(sess, env) {
       const rvol = dc.avgVol > 0 ? cumV / (dc.avgVol * volumeShare(Math.max(1, ctx.minAfterOpen))) : null;
       const cands = [];
       for (const st of detect(ctx)) {
+        if (st.type === 'DIP') continue; // measured as its own family below
         const fams = ['base'];
         if (tc >= tenMs) { fams.push('base10'); if (st.ext <= 1.0) fams.push('base10x'); }
         cands.push({ setup: st, fams });

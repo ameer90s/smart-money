@@ -15,6 +15,7 @@ const SYMS = {
   VELO: { pc: 64.0, ind: 'Retail', avg: 1.5e6, path: 'drift' },
   ORBT: { pc: 12.0, ind: 'Electrical Equipment', avg: 3e6, path: 'fail' },
   SUNQ: { pc: 48.0, ind: 'Semiconductors', avg: 2e6, path: 'late' },
+  DIPX: { pc: 25.0, ind: 'Software', avg: 3e6, path: 'dip' },
   ...Object.fromEntries(['AAAA', 'BBBB', 'CCCC', 'DDDD', 'EEEE', 'FFFF', 'GGGG', 'HHHH'].map((s, i) => [s, { pc: 15 + i * 7, ind: i % 2 ? 'Software' : 'Semiconductors', avg: 2e6, path: 'flat' }])),
   SPY: { pc: 600, ind: '', avg: 6e7, path: 'spy' }, QQQ: { pc: 520, ind: '', avg: 4e7, path: 'spy' },
   XLK: { pc: 230, ind: '', avg: 8e6, path: 'spy' }, XLF: { pc: 50, ind: '', avg: 8e6, path: 'flat' },
@@ -43,6 +44,8 @@ function pctAt(sym, m) {
   if (P === 'flag') return lerp([[H(4), 0], [H(9, 30), 0.005], [H(9, 50), 0.01], [H(10, 2), 0.06], [H(10, 14), 0.052], [H(10, 16), 0.055], [H(10, 20), 0.07], [H(10, 50), 0.09], [H(16), 0.08]]) + noise(sym, m) * 0.15;
   if (P === 'fail') return lerp([[H(4), 0.03], [H(9, 30), 0.05], [H(9, 36), 0.07], [H(9, 40), 0.055], [H(9, 44), 0.065], [H(9, 48), 0.0725], [H(9, 52), 0.078], [H(10, 2), 0.06], [H(10, 20), 0.035], [H(16), 0.03]]) + noise(sym, m) * 0.2;
   if (P === 'late') return lerp([[H(4), 0], [H(9, 30), 0.004], [H(12, 0), 0.01], [H(12, 40), 0.06], [H(13, 0), 0.05], [H(13, 6), 0.053], [H(13, 12), 0.068], [H(14, 30), 0.072], [H(16), 0.06]]) + noise(sym, m) * 0.15;
+  // Strong open, sharp flush well below VWAP, then a steady recovery (the dip setup).
+  if (P === 'dip') return lerp([[H(4), 0.02], [H(9, 30), 0.05], [H(9, 50), 0.09], [H(10, 0), 0.085], [H(10, 20), 0.03], [H(10, 22), 0.031], [H(10, 45), 0.055], [H(11, 0), 0.065], [H(16), 0.06]]) + noise(sym, m) * 0.1;
   if (P === 'drift') return lerp([[H(4), 0], [H(9, 30), 0.02], [H(16), 0.03]]) + noise(sym, m);
   if (P === 'spy') return lerp([[H(4), 0.001], [H(9, 30), 0.002], [H(16), 0.006]]) + noise(sym, m) * 0.2;
   return noise(sym, m) * 2;
@@ -52,7 +55,7 @@ const volAt = (sym, m) => {
   const base = SYMS[sym].avg / 390;
   const mo = m - 570;
   const shape = mo < 0 ? 0.05 : mo < 30 ? 3 : mo < 90 ? 1.4 : mo < 330 ? 0.7 : 1.6;
-  const mover = ['orb', 'vwap', 'flag', 'fail', 'late'].includes(SYMS[sym].path) ? 3.5 : 1;
+  const mover = ['orb', 'vwap', 'flag', 'fail', 'late', 'dip'].includes(SYMS[sym].path) ? 3.5 : 1;
   return Math.round(base * shape * mover * (1 + 0.3 * Math.sin(m + hash(sym))));
 };
 const nyMin = (t) => { const p = ny(t); return p.hh * 60 + p.mm; };

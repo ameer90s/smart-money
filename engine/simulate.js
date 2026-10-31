@@ -9,6 +9,7 @@ export function simulate(bars, fromMs, plan, { flatMs, timeStopMin = 60 } = {}) 
   let mfe = 0, mae = 0, stoppedOrig = false, minutesToT1 = null;
   let exit = null, reason = null, exitT = null;
   const half = 0.5;
+  const full = plan.exit === 'full'; // single target: sell everything at target 1; time stop is unconditional
   for (const b of bars) {
     const t = ms(b.t);
     if (t < fromMs) continue;
@@ -18,7 +19,9 @@ export function simulate(bars, fromMs, plan, { flatMs, timeStopMin = 60 } = {}) 
       else mfe = Math.max(mfe, (b.h - E) / R);
     }
     mae = Math.max(mae, (E - b.l) / R);
+    if (full && (t - fromMs) / 60000 >= timeStopMin) { exit = b.o; reason = 'timestop'; exitT = t; break; }
     if (b.l <= stop) { exit = stop; reason = t1 ? 'be' : 'stop'; exitT = t; break; }
+    if (full && b.h >= T[0]) { t1 = true; exit = T[0]; reason = 't1'; exitT = t; minutesToT1 = Math.round((t - fromMs) / 60000); break; }
     if (!t1 && b.h >= T[0]) { t1 = true; stop = E; minutesToT1 = Math.round((t - fromMs) / 60000); }
     if (t1 && !t2 && b.h >= T[1]) { t2 = true; stop = Math.max(stop, T[0]); }
     if (t2 && b.h >= T[2]) { t3 = true; exit = T[2]; reason = 't3'; exitT = t; break; }
@@ -35,7 +38,7 @@ export function simulate(bars, fromMs, plan, { flatMs, timeStopMin = 60 } = {}) 
       if (b.h >= T[0]) { afterStopT1 = true; break; }
     }
   }
-  const rGross = t1 ? half * ((T[0] - E) / R) + half * ((exit - E) / R) : (exit - E) / R;
+  const rGross = t1 && !full ? half * ((T[0] - E) / R) + half * ((exit - E) / R) : (exit - E) / R;
   return {
     mfe: +Math.min(mfe, 10).toFixed(2), mae: +mae.toFixed(2), stoppedOrig,
     t1, t2, t3, best: t3 ? 3 : t2 ? 2 : t1 ? 1 : 0, reason, exit: +exit.toFixed(4), exitT,

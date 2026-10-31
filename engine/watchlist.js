@@ -45,13 +45,29 @@ export class Watchlist {
     this.cfg = cfg; this.stream = stream; this.today = today; this.openMs = openMs;
     this.onSignal = onSignal; this.onEvent = onEvent;
     this.items = new Map();
+    // Names that left the watchlist stay on the stream for the rest of the day (up to inplayMax),
+    // watched only for the recommendable setups — the lab's dip edge came mostly from these.
+    this.inplay = new Map();
     this.exited = [];
   }
+
+  get(sym) { return this.items.get(sym) || this.inplay.get(sym); }
+  all() { return [...this.items.values(), ...this.inplay.values()]; }
 
   symbols() { return [...this.items.keys()]; }
 
   async add(c, { direct = false } = {}) {
     if (this.items.has(c.sym)) return;
+    const back = this.inplay.get(c.sym);
+    if (back) { // back on the list: keep its bars and what it already fired today
+      this.inplay.delete(c.sym);
+      Object.assign(back, { inplay: false, addedAt: now(), scoreAtAdd: c.score, score: c.score, trend: [c.score], feats: pickFeats(c), why: c.flags || [], direct, spread: c.spread ?? back.spread });
+      this.items.set(c.sym, back);
+      this.recompute(back);
+      this.stream.set(this.streamSymbols());
+      this.onEvent('watch_add', { sym: c.sym, score: c.score, direct, why: back.why, feats: back.feats, t: now() });
+      return;
+    }
     const volK = c.volK || 1;
     const r = await todayBars([c.sym], this.today, { [c.sym]: volK });
     const it = {
@@ -71,16 +87,25 @@ export class Watchlist {
     if (!it || it.hasRec) return;
     this.items.delete(sym);
     this.exited.push({ sym, at: now(), reason, scoreAtAdd: it.scoreAtAdd, score: it.score });
+    if ((this.cfg.inplayMax || 0) > 0) {
+      it.inplay = true; it.droppedAt = now();
+      this.inplay.set(sym, it);
+      if (this.inplay.size > this.cfg.inplayMax) {
+        const oldest = [...this.inplay.values()].filter((x) => !x.hasRec).sort((a, b) => a.droppedAt - b.droppedAt)[0];
+        if (oldest) this.inplay.delete(oldest.sym);
+      }
+      this.recompute(it);
+    }
     this.stream.set(this.streamSymbols());
     this.onEvent('watch_drop', { sym, reason, score: it.score, t: now() });
   }
 
-  streamSymbols() { return [...this.items.keys()]; }
+  streamSymbols() { return [...new Set([...this.items.keys(), ...this.inplay.keys()])].slice(0, 30); }
 
   // Called each scan cycle with the ranked candidates.
   // Every few minutes, swap the IEX minutes that are now old enough for consolidated ones.
   async refreshSip() {
-    const items = [...this.items.values()];
+    const items = this.all();
     if (!items.length || now() - (this.sipAt || 0) < SIP_REFRESH) return;
     this.sipAt = now();
     const cut = now() - SIP_LAG;
@@ -119,7 +144,7 @@ export class Watchlist {
   }
 
   onBar(sym, raw, updated) {
-    const it = this.items.get(sym);
+    const it = this.get(sym);
     if (!it) return;
     if (Date.parse(raw.t) < (it.sipUntil || 0)) return; // already have the consolidated minute
     const bar = it.volK === 1 ? raw : { ...raw, v: raw.v * it.volK };
@@ -131,12 +156,13 @@ export class Watchlist {
   recompute(it) {
     it.ctx = buildCtx(it.bars, this.openMs, { pdh: it.pdh, atrD: it.atrD });
     if (!it.ctx) { it.armed = []; return; }
-    it.armed = detect(it.ctx).filter((s) => !it.fired.has(s.type));
+    const only = it.inplay ? new Set(this.cfg.recSetups || []) : null; // in-play names: recommendable setups only
+    it.armed = detect(it.ctx).filter((s) => !it.fired.has(s.type) && (!only || only.has(s.type)));
     for (const k of Object.keys(it.cross)) if (!it.armed.find((s) => s.type === k)) delete it.cross[k];
   }
 
   onPrice(sym, p, t) {
-    const it = this.items.get(sym);
+    const it = this.get(sym);
     if (!it || !p) return;
     it.last = p;
     const cfg = this.cfg;

@@ -48,7 +48,7 @@ try {
   let first = 0;
   await t('walk-forward replay: live funnel, no hindsight, retires old samples', async () => {
     first = await bootstrap(universe, DEFAULTS, { days: 5, budgetMs: 120000, minReplay: 1 });
-    assert.ok(model.wasReplayed('2026-10-28', '*'));
+    assert.ok(model.wasReplayed('2026-10-28', '*2'));
     const S = model.load().samples;
     const rep = S.filter((s) => s.src === 'replay');
     assert.ok(rep.length >= 1, 'replay produced signals');
@@ -71,15 +71,16 @@ try {
 
   await t('replay state survives a save', () => {
     const saved = JSON.parse(fs.readFileSync(path.join(dir, 'model.json'), 'utf8'));
-    assert.ok(saved.replayed['2026-10-28|*']);
+    assert.ok(saved.replayed['2026-10-28|*2']);
     assert.equal(saved.samples.length, model.load().samples.length);
   });
   await t('AI proposals carry a reason and an effect, and are never applied by themselves', async () => {
-    for (let i = 0; i < 20; i++) model.addSample({ setup: 'VWAP', mfe: i < 4 ? 2 : 0.4, src: 'seed' });
+    for (let i = 0; i < 20; i++) model.addSample({ setup: 'DIP', mfe: i < 4 ? 2 : 0.4, src: 'seed' });
     const { rulesReport } = await import('../engine/analyst.js');
     const rep = rulesReport('2026-10-30');
-    const p = rep.proposals.find((x) => x.id === 'pause-VWAP');
-    assert.ok(p, 'pause proposal for a weak setup');
+    const p = rep.proposals.find((x) => x.id === 'pause-DIP');
+    assert.ok(p, 'pause proposal for a weak recommendable setup');
+    assert.ok(!rep.proposals.some((x) => x.id === 'pause-ORB5' || x.id === 'pause-VWAP'), 'no pause proposals for logged-only setups');
     assert.ok(p.why && /حالة|حالات/.test(p.why) && p.effect);
     assert.ok(rep.proposals.every((x) => !('status' in x) || x.status === 'new'));
   });
