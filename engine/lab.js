@@ -178,15 +178,30 @@ async function labDay(sess, env) {
         const funnels = inWatch ? ['watch', 'inplay'] : ['inplay'];
         const todo = [];
         for (const fam of c.fams) for (const fu of funnels) { const k = `${fam}|${fu}|${s0.type}`; if (!used.has(k)) { used.add(k); todo.push([fam, fu]); } }
-        if (!todo.length) continue;
+        const firstOfType = !used.has(`row|${s0.type}`);
+        if (!todo.length && !firstOfType) continue;
         const regime = regimeAt(spy, spyPc, fillAt, openMs);
         const p = makePlan(s0, ctx, { spread: spread(s0.trigger) }, cfg, { score: sc, regime });
-        if (p.fails.some((f) => STRUCTURAL.has(f))) continue;
-        const costR = ((2 * cfg.feePerSide) / (cfg.capital / p.entry) + p.spread) / p.R;
+        const fails = p.fails.filter((f) => STRUCTURAL.has(f));
         const out = {};
         for (const [ex, k] of Object.entries(EXITS)) {
           out[ex] = k == null ? simulate(bars, fillAt, p, { flatMs, timeStopMin: cfg.timeStopMin }).r : simFixed(bars, fillAt, p.entry, p.stop, p.entry + k * p.R, cfg.timeStopMin, flatMs);
         }
+        if (firstOfType) {
+          // One row per stock, day and setup (first fill), with everything needed to re-cost and
+          // re-filter offline: plan stop and two wider stops, each with fixed 1R/1.5R/2R exits.
+          used.add(`row|${s0.type}`);
+          const wide = (Rw) => ({ R: +Rw.toFixed(4), r1: +simFixed(bars, fillAt, p.entry, p.entry - Rw, p.entry + Rw, cfg.timeStopMin, flatMs).toFixed(3), r15: +simFixed(bars, fillAt, p.entry, p.entry - Rw, p.entry + 1.5 * Rw, cfg.timeStopMin, flatMs).toFixed(3), r2: +simFixed(bars, fillAt, p.entry, p.entry - Rw, p.entry + 2 * Rw, cfg.timeStopMin, flatMs).toFixed(3) });
+          env.rows.push({
+            d: day, s, ty: s0.type, fams: c.fams, w: inWatch ? 1 : 0, e: p.entry, R: +p.R.toFixed(4), sp: p.spread, a5: +ctx.a5.toFixed(4),
+            ext: +s0.ext.toFixed(2), chg: +((ctx.last.c / dc.pc - 1) * 100).toFixed(2), rv: rvol == null ? null : +rvol.toFixed(2), sc, ma: Math.round(ctx.minAfterOpen), rg: regime,
+            dv: +((ctx.vwap - ctx.last.c) / ctx.a5).toFixed(2), fails,
+            x: Object.fromEntries(Object.entries(out).map(([k, v]) => [k, +v.toFixed(3)])),
+            w1: wide(Math.max(p.R, ctx.a5)), w2: wide(Math.max(p.R, 0.01 * p.entry)),
+          });
+        }
+        if (!todo.length || fails.length) continue;
+        const costR = ((2 * cfg.feePerSide) / (cfg.capital / p.entry) + p.spread) / p.R;
         const meta = { day, regime, tod: todBucket(ctx.minAfterOpen), score: scoreBucket(sc), type: s0.type };
         for (const [fam, fu] of todo) for (const ex of Object.keys(EXITS)) record(`${fam}|${ex}|${fu}`, meta, out[ex], out[ex] - costR);
         trades++;
@@ -216,10 +231,11 @@ export async function runLab(universe, cfg, { days = 90, testDays = 30, budgetMs
     for (const [dim, v] of [['regime', m.regime], ['tod', m.tod], ['score', m.score], ['type', m.type], ['month', m.day.slice(0, 7)]]) add((s[dim][v] = s[dim][v] || blank()), gross, net);
   };
   const perDay = [];
+  const rows = [];
   for (const sess of sessions.slice().reverse()) { // newest first, so a cut-off still covers the test set
     if (Date.now() - t0 > budgetMs) { warn('lab', 'time budget reached'); break; }
     try {
-      const r = await labDay(sess, { syms, daily, cfg, record, advOf });
+      const r = await labDay(sess, { syms, daily, cfg, record, advOf, rows });
       perDay.push({ day: sess.date, ...r });
       log(`lab ${sess.date}: ${r.inPlay} in play, ${r.watched} watched, ${r.trades} trades`);
     } catch (e) { warn(`lab ${sess.date}`, e); }
@@ -235,6 +251,7 @@ export async function runLab(universe, cfg, { days = 90, testDays = 30, budgetMs
     perDay, variants,
   };
   writeJSON('lab/latest.json', out);
+  writeJSON('lab/trades-latest.json', { at: out.at, testFrom: out.testFrom, costs: out.costs, rows });
   writeJSON(`lab/${today}-${ny().hm.replace(':', '')}.json`, out);
   log(`lab: ${perDay.length} sessions, ${variants.length} variants in ${out.minutes} min`);
   return out;
