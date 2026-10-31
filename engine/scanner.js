@@ -1,7 +1,7 @@
 // Wide scan: one snapshot pass over the tradable universe, scored for intraday potential.
 import { alpaca } from './alpaca.js';
 import { volumeShare, percentile } from './indicators.js';
-import { snapPrice, prevClose, isToday, isTodayDaily } from './market.js';
+import { snapPrice, prevClose, isToday, isTodayDaily, effectiveSpread } from './market.js';
 
 export function features(sym, snap, u, minAfterOpen, today) {
   if (!snap) return null;
@@ -14,9 +14,12 @@ export function features(sym, snap, u, minAfterOpen, today) {
   const rvol = expected > 0 ? vol / expected : null;
   const range = d ? d.h - d.l : 0;
   const q = snap.latestQuote;
-  let spread = q && q.ap > 0 && q.bp > 0 && q.ap >= q.bp ? q.ap - q.bp : null;
-  if (spread != null && spread > price * 0.05) spread = null; // crossed/stale quote
-  if (spread != null) spread = +spread.toFixed(4);
+  let iexSpread = q && q.ap > 0 && q.bp > 0 && q.ap >= q.bp ? q.ap - q.bp : null;
+  if (iexSpread != null && iexSpread > price * 0.05) iexSpread = null; // crossed/stale quote
+  if (iexSpread != null) iexSpread = +iexSpread.toFixed(4);
+  const spread = +effectiveSpread(price, iexSpread, u.adv).toFixed(4);
+  // IEX carries a few percent of all volume; this scales IEX bar volume to the whole market.
+  const volK = u.avgVol > 0 && u.avgIexVol > 0 ? Math.max(1, Math.min(400, u.avgVol / u.avgIexVol)) : 1;
   const mb = snap.minuteBar;
   const perMin = vol / Math.max(1, minAfterOpen);
   return {
@@ -29,7 +32,7 @@ export function features(sym, snap, u, minAfterOpen, today) {
     aboveVw: d && d.vw ? price > d.vw : null,
     posInRange: range > 0 ? (price - d.l) / range : 0.5,
     hod: d ? d.h : price,
-    spread,
+    spread, iexSpread, volK, adv: u.adv,
     accel: mb && perMin > 0 && isToday(mb, today) ? mb.v / perMin : null,
     atrD: u.atrD, pdh: u.pdh, sector: u.sh ? u.sh.sector : 'SPY', name: u.name,
   };

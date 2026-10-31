@@ -25,11 +25,15 @@ export function dailyStats(bars) {
   };
 }
 
+// Calendar days of daily history: about 48 sessions of past movers for the historical replay.
+export const UNIVERSE_WIN = 70;
+
 export async function buildUniverse(cfg, today, { allowDoubtful = false } = {}) {
   const t0 = Date.now();
   const assets = (await alpaca.assets()).filter(isCommonStock);
   const meta = Object.fromEntries(assets.map((a) => [a.symbol, { name: a.name, exchange: a.exchange }]));
-  const start = isoNy(addDays(today, -35), '00:00');
+  const start = isoNy(addDays(today, -UNIVERSE_WIN), '00:00');
+  const iexStart = isoNy(addDays(today, -35), '00:00');
   const end = isoNy(addDays(today, -1), '20:00');
   const sip = await alpaca.bars(assets.map((a) => a.symbol), { timeframe: '1Day', start, end, feed: 'sip', per: 200 });
   const liquid = [];
@@ -57,13 +61,13 @@ export async function buildUniverse(cfg, today, { allowDoubtful = false } = {}) 
   }
   for (const d of Object.keys(movers)) movers[d] = movers[d].sort((a, b) => b.k - a.k).slice(0, 30).map((x) => x.s);
   // IEX history for a like-for-like relative volume against the live IEX feed.
-  const iex = await alpaca.bars(liquid.map((x) => x.s), { timeframe: '1Day', start, end, feed: 'iex', per: 200 });
+  const iex = await alpaca.bars(liquid.map((x) => x.s), { timeframe: '1Day', start: iexStart, end, feed: 'iex', per: 200 });
   for (const x of liquid) {
     const b = iex[x.s] || [];
     x.avgIexVol = b.length ? mean(b.slice(-20).map((k) => k.v)) : 0;
   }
   const universe = {
-    day: today, builtAt: Date.now(), assets: assets.length, liquid: liquid.length, movers,
+    day: today, builtAt: Date.now(), win: UNIVERSE_WIN, assets: assets.length, liquid: liquid.length, movers,
     symbols: liquid.map((x) => ({ ...x, adv: Math.round(x.adv), avgVol: Math.round(x.avgVol), avgIexVol: Math.round(x.avgIexVol), atrD: +x.atrD.toFixed(3) })),
   };
   writeJSON('universe.json', universe);

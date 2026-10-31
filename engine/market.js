@@ -51,3 +51,26 @@ export async function marketContext() {
 }
 
 export const REGIME_AR = { up: 'صاعد', flat: 'متذبذب', down: 'هابط' };
+
+// The free data plan quotes IEX only, and IEX is often not at the best price, so its
+// bid/ask gap overstates the real (consolidated) spread — sometimes by dollars. The real
+// spread is never wider than one venue's own quote, so: estimate the typical spread from
+// the stock's average daily dollar volume, and use the IEX quote only when it is tighter.
+export function typicalSpreadBps(adv) {
+  if (!adv) return 15;
+  if (adv >= 500e6) return 2;
+  if (adv >= 100e6) return 3;
+  if (adv >= 30e6) return 5;
+  if (adv >= 10e6) return 10;
+  return 20;
+}
+
+// Rounded up to whole cents (the tick size), never below one cent.
+export function estSpread(price, adv) {
+  return Math.max(0.01, Math.ceil((price * typicalSpreadBps(adv)) / 100 - 1e-9) / 100);
+}
+
+export function effectiveSpread(price, quoteSpread, adv) {
+  const est = estSpread(price, adv);
+  return quoteSpread != null && quoteSpread > 0 ? Math.min(quoteSpread, est) : est;
+}

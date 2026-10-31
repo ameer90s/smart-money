@@ -57,6 +57,9 @@ const checks = [
   ['live payload has watch, recs, stats, market', !!liveObj && Array.isArray(liveObj.watch) && Array.isArray(liveObj.recs) && liveObj.stats && liveObj.market],
   ['scanner minute log written', scanner.length >= 10],
   ['each record tagged with strategy version', recs.every((r) => r.version) && signals.every((s) => s.version)],
+  ['history uses consolidated (SIP) bars', (cap.feeds.sip || 0) > 0],
+  ['never asks for SIP newer than 15 minutes', cap.sipRecent === 0],
+  ['wide IEX quote does not inflate the spread', signals.every((s) => s.plan.spread <= 0.1) && recs.every((r) => r.plan.spread <= 0.1)],
 ];
 console.log('\n=== e2e results ===');
 let ok = true;
@@ -64,6 +67,7 @@ for (const [name, pass] of checks) { console.log(`${pass ? 'PASS' : 'FAIL'}  ${n
 console.log(`recs: ${recs.map((r) => `${r.sym}/${r.setup} ${r.status}${r.result ? ` ${r.result.net}$` : ''}`).join(', ') || 'none'}`);
 console.log(`signals: ${signals.map((s) => `${s.sym}/${s.setup}:${s.accepted ? 'ok' : s.why.join('+')}`).join(', ')}`);
 console.log(`ntfy: ${cap.ntfy.map((n) => n.title).join(' | ')}`);
+console.log(`bars requests by feed: ${JSON.stringify(cap.feeds)} · spreads: ${signals.map((s) => `${s.sym} ${s.plan.spread}`).join(', ')}`);
 console.log(`data dir: ${dataDir}  real time: ${Math.round((Date.now() - t0) / 1000)}s`);
 fs.writeFileSync(path.join(dataDir, 'live-final.json'), JSON.stringify(liveObj, null, 1));
 process.exit(ok ? 0 : 1);

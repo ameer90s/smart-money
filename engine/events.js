@@ -60,18 +60,19 @@ export async function recordOutcomes(week) {
   if (!week) return false;
   let changed = false;
   for (const e of week.econ) {
-    if (e.result || now() < e.t + 35 * 60000) continue;
+    // Consolidated (SIP) bars are served once they are over 15 minutes old: wait 30 + 16 minutes.
+    if ((e.result && e.result.src === 'sip') || now() < e.t + 47 * 60000) continue; // older IEX-based results are re-measured
     try {
       // Pre-market releases are measured on the opening half hour; others from the release time.
       const pre = e.hm < '09:30';
       const t0 = pre ? Date.parse(isoNy(e.day, '09:30')) : e.t;
-      if (now() < t0 + 35 * 60000) continue;
+      if (now() < t0 + 47 * 60000) continue;
       const start = new Date(t0).toISOString();
-      const end = new Date(t0 + 30 * 60000).toISOString();
-      const bars = (await alpaca.bars(['SPY'], { timeframe: '1Min', start, end, feed: 'iex' })).SPY || [];
+      const end = new Date(t0 + 29 * 60000).toISOString(); // 30 one-minute bars: open at t0 to close at t0+30
+      const bars = (await alpaca.bars(['SPY'], { timeframe: '1Min', start, end, feed: 'sip' })).SPY || [];
       if (bars.length >= 2) {
         const mv = (bars[bars.length - 1].c / bars[0].o - 1) * 100;
-        e.result = { spy30: +mv.toFixed(2), from: ny(Date.parse(bars[0].t)).hm, to: ny(Date.parse(bars[bars.length - 1].t)).hm };
+        e.result = { spy30: +mv.toFixed(2), from: ny(Date.parse(bars[0].t)).hm, to: ny(Date.parse(bars[bars.length - 1].t)).hm, src: 'sip' };
         changed = true;
       }
     } catch (err) { warn('event outcome', err); }

@@ -92,14 +92,15 @@ function snapshot(sym) {
   const daily = bars.length ? { t: new Date(nyToUtc(DAY, '00:00')).toISOString(), o: bars.find((b) => nyMin(Date.parse(b.t)) >= 570)?.o || bars[0].o, h: Math.max(...bars.map((b) => b.h), p), l: Math.min(...bars.map((b) => b.l), p), c: p, v: bars.reduce((a, b) => a + b.v, 0), vw: bars.reduce((a, b) => a + b.vw * b.v, 0) / Math.max(1, bars.reduce((a, b) => a + b.v, 0)) } : null;
   return {
     latestTrade: { t: new Date(t).toISOString(), p, s: 100 },
-    latestQuote: { t: new Date(t).toISOString(), bp: +(p - 0.01).toFixed(2), ap: +(p + 0.01).toFixed(2), bs: 3, as: 4 },
+    // NOVX: IEX is away from the best price, so its own bid/ask gap is wide (as seen live).
+    latestQuote: sym === 'NOVX' ? { t: new Date(t).toISOString(), bp: +(p - 0.6).toFixed(2), ap: +(p + 0.6).toFixed(2), bs: 1, as: 1 } : { t: new Date(t).toISOString(), bp: +(p - 0.01).toFixed(2), ap: +(p + 0.01).toFixed(2), bs: 3, as: 4 },
     minuteBar: bars[bars.length - 1] || null,
     dailyBar: daily || { t: new Date(nyToUtc(addDays(DAY, -1), '00:00')).toISOString(), o: pc, h: pc, l: pc, c: pc, v: SYMS[sym].avg, vw: pc },
     prevDailyBar: daily ? { t: new Date(nyToUtc(addDays(DAY, -1), '00:00')).toISOString(), o: pc, h: +(pc * 1.01).toFixed(2), l: +(pc * 0.99).toFixed(2), c: pc, v: SYMS[sym].avg, vw: pc } : { t: new Date(nyToUtc(addDays(DAY, -2), '00:00')).toISOString(), c: pc },
   };
 }
 
-export const captured = { ntfy: [], gist: { 'settings.json': { content: '{}' } }, gistPatches: 0 };
+export const captured = { ntfy: [], gist: { 'settings.json': { content: '{}' } }, gistPatches: 0, feeds: {}, sipRecent: 0 };
 
 function send(res, code, obj) { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(obj)); }
 
@@ -115,6 +116,9 @@ const server = http.createServer((req, res) => {
     if (p === '/v2/assets') return send(res, 200, ASSETS);
     if (p === '/v2/stocks/snapshots') return send(res, 200, Object.fromEntries(q.symbols.split(',').filter((s) => SYMS[s]).map((s) => [s, snapshot(s)])));
     if (p === '/v2/stocks/bars') {
+      captured.feeds[q.feed || 'none'] = (captured.feeds[q.feed || 'none'] || 0) + 1;
+      // Free plan: consolidated (SIP) data only when it is over 15 minutes old.
+      if (q.feed === 'sip' && Date.parse(q.end) > now() - 15 * 60000) { captured.sipRecent++; return send(res, 403, { message: 'subscription does not permit querying recent SIP data' }); }
       const syms = q.symbols.split(',').filter((s) => SYMS[s]);
       const out = {};
       for (const s of syms) {

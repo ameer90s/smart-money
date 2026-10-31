@@ -8,8 +8,32 @@ const K = 20;          // smoothing strength (pseudo-samples)
 const MAX = 6000;      // samples kept
 let M = null;
 
+// One sample per source, day, symbol and setup; a re-run of the replay (or a restarted
+// engine re-firing the same setup) must not count the same trade twice.
+const keyOf = (s) => `${s.src}|${s.day}|${s.sym}|${s.setup}`;
+let IDX = null;
+
+function recount(m) {
+  m.sources = {};
+  for (const s of m.samples) m.sources[s.src] = (m.sources[s.src] || 0) + 1;
+}
+
 export function load() {
-  if (!M) M = readJSON(REL, { v: 1, samples: [], calib: [], trainedAt: 0, sources: {} });
+  if (!M) {
+    M = readJSON(REL, { v: 1, samples: [], calib: [], trainedAt: 0, sources: {} });
+    if (!M.replayed) { // files written before replay tracking: seed it from the samples
+      M.replayed = {};
+      for (const x of M.samples) if (x.src === 'backtest' && x.day && x.sym) M.replayed[`${x.day}|${x.sym}`] = 1;
+    }
+    IDX = new Set();
+    const kept = [];
+    for (const s of M.samples) {
+      if (s.day && s.sym) { const k = keyOf(s); if (IDX.has(k)) continue; IDX.add(k); }
+      kept.push(s);
+    }
+    if (kept.length !== M.samples.length) M.samples = kept;
+    recount(M);
+  }
   return M;
 }
 export function save() { if (M) writeJSON(REL, M); }
@@ -21,10 +45,32 @@ export const scoreBucket = (s) => (s >= 80 ? 'hi' : s >= 65 ? 'mid' : 'lo');
 // sample: { setup, mfe (R reached before stop / close), score, tod, regime, src, day, sym }
 export function addSample(s) {
   const m = load();
+  if (s.day && s.sym) {
+    const k = keyOf(s);
+    if (IDX.has(k)) return false;
+    IDX.add(k);
+  }
   m.samples.push(s);
-  if (m.samples.length > MAX) m.samples.splice(0, m.samples.length - MAX);
-  m.sources[s.src] = (m.sources[s.src] || 0) + 1;
+  if (m.samples.length > MAX) {
+    for (const x of m.samples.splice(0, m.samples.length - MAX)) if (x.day && x.sym) IDX.delete(keyOf(x));
+    recount(m);
+  } else m.sources[s.src] = (m.sources[s.src] || 0) + 1;
+  return true;
 }
+
+// Which (day, symbol) pairs the historical replay already covered, so a full replay only
+// fetches what is new. Capped to the newest few thousand pairs.
+export function wasReplayed(day, sym) { return !!load().replayed[`${day}|${sym}`]; }
+export function markReplayed(day, sym) {
+  const m = load();
+  m.replayed[`${day}|${sym}`] = 1;
+  const keys = Object.keys(m.replayed);
+  if (keys.length > 8000) {
+    const cutoff = keys.map((k) => k.slice(0, 10)).sort().reverse()[7000];
+    for (const k of keys) if (k.slice(0, 10) < cutoff) delete m.replayed[k];
+  }
+}
+export function backtestDays() { return [...new Set(load().samples.filter((s) => s.src === 'backtest').map((s) => s.day))].sort(); }
 
 function rate(list, r, prior) {
   const hits = list.reduce((a, s) => a + (s.mfe >= r ? 1 : 0), 0);

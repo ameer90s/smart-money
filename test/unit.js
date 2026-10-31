@@ -9,6 +9,7 @@ import { sanitize } from '../engine/live.js';
 import { volumeShare, aggregate } from '../engine/indicators.js';
 import { isCommonStock } from '../engine/universe.js';
 import { DEFAULTS } from '../engine/config.js';
+import { estSpread, effectiveSpread } from '../engine/market.js';
 
 let n = 0;
 const t = (name, fn) => { fn(); n++; console.log(`PASS  ${name}`); };
@@ -101,6 +102,14 @@ t('intraday volume curve and 5-minute aggregation', () => {
   assert.ok(volumeShare(30) > 0.15 && volumeShare(30) < 0.2);
   const b5 = aggregate(bars, 5, open);
   assert.equal(b5.length, Math.ceil(bars.length / 5));
+});
+
+t('spread: liquidity estimate caps a wide IEX quote, a tight quote wins', () => {
+  assert.equal(estSpread(315.8, 300e6), 0.1);       // 3 bps, rounded up to the cent
+  assert.equal(effectiveSpread(315.8, 5.17, 300e6), 0.1); // the FDX case from 30 Oct
+  assert.equal(effectiveSpread(84, 0.01, 300e6), 0.01);
+  assert.equal(effectiveSpread(25.76, null, 20e6), 0.03);
+  assert.equal(estSpread(5, 1e9), 0.01);            // never below one cent
 });
 
 console.log(`\n${n} unit checks passed`);

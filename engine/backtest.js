@@ -8,6 +8,7 @@ import { plan as makePlan } from './planner.js';
 import { simulate } from './simulate.js';
 import { vwapSeries, atr, ms } from './indicators.js';
 import { statusOf, loadCache } from './shariah.js';
+import { estSpread } from './market.js';
 import * as model from './model.js';
 import { log, warn } from './log.js';
 
@@ -24,7 +25,7 @@ function regimeAt(spy, t, openMs) {
   return 'flat';
 }
 
-export function replaySymbol({ sym, day, bars, spy, cfg, pdh, atrD }) {
+export function replaySymbol({ sym, day, bars, spy, cfg, pdh, atrD, adv }) {
   const openMs = nyToUtc(day, '09:30');
   const fromMs = nyToUtc(day, cfg.recFrom);
   const toMs = nyToUtc(day, cfg.recTo);
@@ -47,7 +48,7 @@ export function replaySymbol({ sym, day, bars, spy, cfg, pdh, atrD }) {
         if (b.o > s.trigger + 0.25 * R0) break; // gapped through the trigger: not a fill we'd chase
         used.add(s.type);
         const regime = regimeAt(spy, ms(b.t), openMs);
-        const p = makePlan(s, ctx, { spread: Math.max(0.01, 0.0003 * s.trigger) }, cfg, { score: 70, regime });
+        const p = makePlan(s, ctx, { spread: estSpread(s.trigger, adv) }, cfg, { score: 70, regime });
         if (p.fails.some((f) => STRUCTURAL.has(f))) break;
         const sim = simulate(bars, ms(b.t), p, { flatMs, timeStopMin: cfg.timeStopMin });
         out.push({ setup: s.type, mfe: sim.mfe, score: 'mid', tod: model.todBucket(ctx.minAfterOpen), regime, src: 'backtest', day, sym, r: sim.r });
@@ -62,11 +63,15 @@ export async function bootstrap(universe, cfg, { days = 20, perDay = 12, budgetM
   const t0 = Date.now();
   loadCache();
   const mv = (universe && universe.movers) || {};
-  const dayList = Object.keys(mv).sort().slice(-days);
-  let total = 0;
+  const advOf = Object.fromEntries(((universe && universe.symbols) || []).map((x) => [x.s, x.adv]));
+  // Newest sessions first, so a cut-off budget still covers the most relevant market.
+  const dayList = Object.keys(mv).sort().slice(-days).reverse();
+  let total = 0, pairs = 0, skipped = 0;
   for (const day of dayList) {
     if (Date.now() - t0 > budgetMs) break;
-    const syms = mv[day].filter((s) => statusOf(s) === 'ok').slice(0, perDay);
+    const ok = mv[day].filter((s) => statusOf(s) === 'ok');
+    const syms = ok.filter((s) => !model.wasReplayed(day, s)).slice(0, perDay);
+    skipped += Math.min(ok.length, perDay) - syms.length;
     if (!syms.length) continue;
     try {
       const bars = await alpaca.bars([...syms, 'SPY'], { timeframe: '1Min', start: isoNy(day, '04:00'), end: isoNy(day, '16:00'), feed: 'sip' });
@@ -75,14 +80,15 @@ export async function bootstrap(universe, cfg, { days = 20, perDay = 12, budgetM
         const d = daily[sym] || [];
         const pdh = d.length ? d[d.length - 1].h : null;
         const atrD = d.length > 5 ? atr(d.slice(-15), 14) : null;
-        const res = replaySymbol({ sym, day, bars: bars[sym] || [], spy: bars.SPY || [], cfg, pdh, atrD });
-        for (const s of res) model.addSample(s);
-        total += res.length;
+        const res = replaySymbol({ sym, day, bars: bars[sym] || [], spy: bars.SPY || [], cfg, pdh, atrD, adv: advOf[sym] });
+        for (const s of res) if (model.addSample(s)) total++;
+        model.markReplayed(day, sym);
+        pairs++;
       }
     } catch (e) { warn(`backtest ${day}`, e); }
   }
   model.markTrained();
   model.save();
-  log(`backtest: ${total} historical signals from ${dayList.length} sessions in ${Math.round((Date.now() - t0) / 1000)}s`);
+  log(`backtest: ${total} new historical signals from ${pairs} stock-days (${skipped} already replayed) across ${dayList.length} sessions in ${Math.round((Date.now() - t0) / 1000)}s`);
   return total;
 }

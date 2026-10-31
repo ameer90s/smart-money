@@ -2,8 +2,8 @@
 // in the app's settings is merged on top of these at runtime (see live.js).
 import path from 'node:path';
 
-export const VERSION = 'S1.0';
-export const APP_VERSION = '1.0.0';
+export const VERSION = 'S1.1';
+export const APP_VERSION = '1.1.0';
 
 export const DEFAULTS = {
   capital: 1000,          // virtual account, USD

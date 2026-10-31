@@ -7,6 +7,39 @@ import { ms } from './indicators.js';
 import * as model from './model.js';
 import { warn } from './log.js';
 
+// The free plan serves consolidated (SIP) bars only when they are over 15 minutes old;
+// newer minutes come from IEX alone, whose volume is scaled up to the whole market.
+const SIP_LAG = 16 * 60000;
+const SIP_REFRESH = 5 * 60000;
+
+function mergeBars(base, better) {
+  const m = new Map(base.map((b) => [b.t, b]));
+  for (const b of better) m.set(b.t, b);
+  return [...m.values()].sort((a, b) => (a.t < b.t ? -1 : a.t > b.t ? 1 : 0));
+}
+const scaleVol = (bars, k) => (k === 1 ? bars : bars.map((b) => ({ ...b, v: b.v * k })));
+
+// Today's 1-minute bars: SIP up to SIP_LAG ago, IEX (volume scaled) after that.
+export async function todayBars(syms, today, volK = {}) {
+  const startMs = Date.parse(isoNy(today, '04:00'));
+  const cut = now() - SIP_LAG;
+  const out = {};
+  let sip = {};
+  if (cut > startMs + 60000) {
+    try { sip = await alpaca.bars(syms, { timeframe: '1Min', start: new Date(startMs).toISOString(), end: new Date(cut).toISOString(), feed: 'sip' }); }
+    catch (e) { warn('sip bars', e); sip = null; } // fall back to IEX for the whole day; refreshSip retries
+  }
+  const iexFrom = sip ? Math.max(startMs, cut - 60000) : startMs;
+  let iex = {};
+  try { iex = await alpaca.bars(syms, { timeframe: '1Min', start: new Date(iexFrom).toISOString(), end: new Date(now()).toISOString(), feed: 'iex' }); }
+  catch (e) { warn('iex bars', e); }
+  for (const s of syms) {
+    const tail = scaleVol(iex[s] || [], volK[s] || 1);
+    out[s] = mergeBars(tail, (sip && sip[s]) || []);
+  }
+  return { bars: out, sipUntil: sip ? Math.max(startMs, cut) : startMs };
+}
+
 export class Watchlist {
   constructor({ cfg, stream, today, openMs, onSignal, onEvent }) {
     this.cfg = cfg; this.stream = stream; this.today = today; this.openMs = openMs;
@@ -19,15 +52,12 @@ export class Watchlist {
 
   async add(c, { direct = false } = {}) {
     if (this.items.has(c.sym)) return;
-    let bars = [];
-    try {
-      const r = await alpaca.bars([c.sym], { timeframe: '1Min', start: isoNy(this.today, '04:00'), end: new Date(now()).toISOString(), feed: 'iex' });
-      bars = r[c.sym] || [];
-    } catch (e) { warn(`bars ${c.sym}`, e); }
+    const volK = c.volK || 1;
+    const r = await todayBars([c.sym], this.today, { [c.sym]: volK });
     const it = {
       sym: c.sym, name: c.name, sector: c.sector, addedAt: now(), scoreAtAdd: c.score, score: c.score, trend: [c.score],
       feats: pickFeats(c), why: c.flags || [], direct,
-      bars, ctx: null, armed: [], cross: {}, fired: new Set(), last: c.price, spread: c.spread,
+      bars: r.bars[c.sym] || [], sipUntil: r.sipUntil, volK, ctx: null, armed: [], cross: {}, fired: new Set(), last: c.price, spread: c.spread,
       pdh: c.pdh, atrD: c.atrD, hasRec: false,
     };
     this.items.set(c.sym, it);
@@ -48,8 +78,27 @@ export class Watchlist {
   streamSymbols() { return [...this.items.keys()]; }
 
   // Called each scan cycle with the ranked candidates.
+  // Every few minutes, swap the IEX minutes that are now old enough for consolidated ones.
+  async refreshSip() {
+    const items = [...this.items.values()];
+    if (!items.length || now() - (this.sipAt || 0) < SIP_REFRESH) return;
+    this.sipAt = now();
+    const cut = now() - SIP_LAG;
+    const from = Math.min(...items.map((it) => it.sipUntil || cut));
+    if (cut - from < 60000) return;
+    let r;
+    try { r = await alpaca.bars(items.map((it) => it.sym), { timeframe: '1Min', start: new Date(from).toISOString(), end: new Date(cut).toISOString(), feed: 'sip' }); }
+    catch (e) { warn('sip refresh', e); return; }
+    for (const it of items) {
+      const sb = (r[it.sym] || []).filter((b) => Date.parse(b.t) >= (it.sipUntil || 0));
+      if (sb.length) { it.bars = mergeBars(it.bars, sb); this.recompute(it); }
+      it.sipUntil = cut;
+    }
+  }
+
   async update(cands) {
     const cfg = this.cfg;
+    await this.refreshSip();
     const byS = Object.fromEntries(cands.map((c) => [c.sym, c]));
     for (const it of this.items.values()) {
       const c = byS[it.sym];
@@ -69,9 +118,11 @@ export class Watchlist {
     }
   }
 
-  onBar(sym, bar, updated) {
+  onBar(sym, raw, updated) {
     const it = this.items.get(sym);
     if (!it) return;
+    if (Date.parse(raw.t) < (it.sipUntil || 0)) return; // already have the consolidated minute
+    const bar = it.volK === 1 ? raw : { ...raw, v: raw.v * it.volK };
     const i = it.bars.findIndex((b) => b.t === bar.t);
     if (i >= 0) it.bars[i] = bar; else it.bars.push(bar);
     if (!updated) this.recompute(it);

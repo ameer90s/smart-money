@@ -9,7 +9,7 @@ import { alpaca } from './alpaca.js';
 import { callsPerMinute } from './http.js';
 import { Stream } from './stream.js';
 import { readJSON, writeJSON, DayCollection, dayRel, listDays } from './store.js';
-import { buildUniverse, loadUniverse, tradable, screenUniverse, universeCounts } from './universe.js';
+import { buildUniverse, loadUniverse, tradable, screenUniverse, universeCounts, UNIVERSE_WIN } from './universe.js';
 import { check as shariahCheck, statusOf, needsCheck, recordOf, saveCache } from './shariah.js';
 import { scan, features, score as scoreOf, flags as flagsOf } from './scanner.js';
 import { Watchlist } from './watchlist.js';
@@ -169,8 +169,9 @@ async function prepare(day) {
   // Screen the most liquid unscreened names first, within a time budget before the open.
   const untilOpen = nyToUtc(day, '09:25') - now();
   await screenUniverse(u, Math.max(60000, Math.min(untilOpen, 25 * 60000)));
-  if (model.load().samples.length < 150 && !flagDone(`bt-${day}`)) {
-    setFlag(`bt-${day}`);
+  // Quick replay before the open only when the model is nearly empty; the full one runs in maintenance.
+  if (model.load().samples.length < 150 && !flagDone(`btq-${day}`)) {
+    setFlag(`btq-${day}`);
     try { await bootstrap(u, cfg, { budgetMs: Math.max(60000, Math.min(nyToUtc(day, '09:28') - now(), 20 * 60000)) }); } catch (e) { warn('bootstrap', e); }
   }
   let week = loadWeek(day);
@@ -352,10 +353,11 @@ async function maintenance(day) {
   rt.phase = 'maintenance';
   rt.day = day; rt.sess = null;
   let u = loadUniverse();
-  if (!u || (now() - (u.builtAt || 0)) > 3 * 864e5) { try { u = await buildUniverse(cfg, day); } catch (e) { warn('universe', e); } }
+  if (!u || (now() - (u.builtAt || 0)) > 3 * 864e5 || (u.win || 35) < UNIVERSE_WIN) { try { u = await buildUniverse(cfg, day); } catch (e) { warn('universe', e); } }
   if (u) {
     await screenUniverse(u, 60 * 60000);
-    if (model.load().samples.length < 600 && !flagDone(`bt-${day}`)) { setFlag(`bt-${day}`); try { await bootstrap(u, cfg, { days: 20, perDay: 15, budgetMs: 60 * 60000 }); } catch (e) { warn('bootstrap', e); } }
+    // Full replay: incremental (already-replayed stock-days are skipped), so it can run every maintenance.
+    if (!flagDone(`btfull-${day}`)) { setFlag(`btfull-${day}`); try { await bootstrap(u, cfg, { days: 45, perDay: 30, budgetMs: 60 * 60000 }); } catch (e) { warn('bootstrap', e); } }
     if (!flagDone(`week-${day}`) && ['Sat', 'Sun'].includes(ny().dow)) { setFlag(`week-${day}`); try { await buildWeek(addDays(day, ny().dow === 'Sat' ? 2 : 1), tradable(u, true).map((x) => x.s)); } catch (e) { warn('week', e); } }
   }
   rt.mkt = await marketContext();
