@@ -30,7 +30,7 @@ export async function auditDay(day, cfg) {
     signals.upsert(s);
     const structuralFail = (s.plan.fails || []).some((f) => STRUCTURAL.has(f));
     if (!structuralFail && !s.sampled) {
-      model.addSample({ setup: s.setup, mfe: sim.mfe, score: model.scoreBucket(s.score || 0), tod: model.todBucket(s.minAfterOpen || 60), regime: s.regime, src: 'live', day, sym: s.sym });
+      model.addSample({ setup: s.setup, mfe: sim.mfe, r: sim.r, score: model.scoreBucket(s.score || 0), tod: model.todBucket(s.minAfterOpen || 60), regime: s.regime, src: 'live', day, sym: s.sym });
       s.sampled = true;
     }
     n++;

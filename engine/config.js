@@ -3,7 +3,7 @@
 import path from 'node:path';
 
 export const VERSION = 'S1.3';
-export const APP_VERSION = '1.3.0';
+export const APP_VERSION = '1.3.1';
 
 export const DEFAULTS = {
   capital: 1000,          // virtual account, USD

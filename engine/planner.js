@@ -72,16 +72,24 @@ export function plan(setup, ctx, q, cfg, feats = {}) {
     };
   });
   let best = targets.reduce((b, t) => (t.ev > b.ev ? t : b), targets[0]);
+  let fixedInfo = null;
   if (fixedK) {
     // One exit at k·R: break-even win rate is 1/(1+k) before costs. Trial week judges the edge
     // before fees (they are still charged in the result); otherwise after fees.
+    // The profit of a one-target plan also comes from time exits, so the gate uses the measured
+    // average result of past cases (expectancy). With fewer than 30 cases it falls back to the
+    // chance of reaching the target before the stop.
     best = targets[0];
     const p1 = targets[0].prob;
-    const evGross = p1 * fixedK - (1 - p1);
-    const ev = cfg.trialGross ? evGross : targets[0].ev;
+    const ex = model.expectancy(setup.type, fe);
+    const enough = ex.n >= 30;
+    const evGross = enough ? ex.ev : p1 * fixedK - (1 - p1);
+    const ev = cfg.trialGross ? evGross : evGross - costR;
     targets[0].evGross = round(evGross, 3);
+    targets[0].ev = round(evGross - costR, 3);
+    fixedInfo = { win: ex.win == null ? null : round(ex.win, 3), nExp: ex.n };
     if ((t1.p - entry) < cfg.costMult * costPerShare) fails.push('cost');
-    if (p1 < 1 / (1 + fixedK) + 0.02) fails.push('prob');
+    if (!enough && p1 < 1 / (1 + fixedK) + 0.02) fails.push('prob');
     if (ev < 0.05) fails.push('ev');
   } else {
     if (targets[0].netR < cfg.rrMinNet) fails.push('rr');
@@ -94,7 +102,7 @@ export function plan(setup, ctx, q, cfg, feats = {}) {
     setup: setup.type, label: setup.label,
     entry: round(entry), maxBuy: round(entry + 0.2 * R), stop: round(stop), R: round(R, 3),
     rPct: round((R / entry) * 100), atr5: round(a, 3), stopAtr: round(R / a),
-    targets, expected: best.k, ev: fixedK && cfg.trialGross ? targets[0].evGross : best.ev, exit: fixedK ? 'full' : 'scale',
+    targets, expected: best.k, ev: fixedK && cfg.trialGross ? targets[0].evGross : best.ev, exit: fixedK ? 'full' : 'scale', ...(fixedInfo || {}),
     stopProb: round(1 - targets[0].prob, 3),
     sizing: { shares, cost: round(shares * entry), riskUsd: round(shares * R + fees), fees },
     costR: round(costR, 3), spread: round(spread, 4), ext: round(setup.ext),

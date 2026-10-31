@@ -102,6 +102,25 @@ export function prob(setup, r, feats = {}) {
   return { p: Math.max(0.02, Math.min(0.95, s.p * adj)), n: mine.length, nAll: all.length };
 }
 
+// Expected result per trade in R (before fees) for setups with one fixed target: the average
+// outcome of past cases, including time exits, shrunk toward zero edge, then adjusted for time
+// of day and market regime where there are at least 30 cases.
+export function expectancy(setup, feats = {}) {
+  const all = load().samples.filter((s) => s.setup === setup && typeof s.r === 'number');
+  const n = all.length;
+  if (!n) return { ev: 0, n: 0, win: null };
+  const mean = all.reduce((a, s) => a + s.r, 0) / n;
+  let ev = (mean * n) / (n + K);
+  for (const [key, val] of [['tod', feats.tod], ['regime', feats.regime]]) {
+    if (val == null) continue;
+    const sub = all.filter((x) => x[key] === val);
+    if (sub.length < 30) continue;
+    const m = sub.reduce((a, s) => a + s.r, 0) / sub.length;
+    ev += (m * sub.length + mean * K) / (sub.length + K) - mean;
+  }
+  return { ev, n, win: all.filter((s) => s.r > 0).length / n };
+}
+
 export function addCalib(pred, hit) {
   const m = load();
   m.calib.push({ p: +pred.toFixed(3), h: hit ? 1 : 0 });
