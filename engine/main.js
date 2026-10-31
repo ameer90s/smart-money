@@ -19,6 +19,7 @@ import { marketContext, REGIME_AR, SECTOR_NAMES } from './market.js';
 import { buildWeek, loadWeek, dayRules, recordOutcomes } from './events.js';
 import { auditDay } from './audit.js';
 import { bootstrap } from './backtest.js';
+import { runLab } from './lab.js';
 import { runAnalyst, CAUSE_AR, FAIL_AR } from './analyst.js';
 import { finnhub } from './finnhub.js';
 import * as model from './model.js';
@@ -373,6 +374,11 @@ async function main() {
   await refreshSettings();
   const mode = process.env.MODE || 'auto';
   if (mode === 'maintenance') { await maintenance(ny().ymd); exitWith('done'); }
+  if (mode === 'lab') { // research only: writes lab/latest.json, never touches the live model
+    const u = loadUniverse();
+    if (u) { try { await runLab(u, cfg, { days: Number(process.env.LAB_DAYS || 90) }); } catch (e) { warn('lab', e); } }
+    exitWith('done');
+  }
   for (;;) {
     const stop = shouldStop(); if (stop) exitWith(stop);
     const day = ny().ymd;

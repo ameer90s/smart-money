@@ -7,6 +7,6 @@
   "engines": { "node": ">=22" },
   "scripts": {
     "engine": "node engine/main.js",
-    "test": "node test/unit.js && node test/model.js && node test/api.js && node test/e2e.js"
+    "test": "node test/unit.js && node test/model.js && node test/lab.js && node test/api.js && node test/e2e.js"
   }
 }

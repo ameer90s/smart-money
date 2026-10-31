@@ -98,7 +98,7 @@ export function simulateWatch(series, scanTimes, cfg, endMs) {
 }
 
 // Regime as the live engine sees it: SPY against its previous close and its VWAP.
-function regimeAt(spy, spyPc, t, openMs) {
+export function regimeAt(spy, spyPc, t, openMs) {
   let cumV = 0, cumPV = 0, p = null;
   for (const b of spy) {
     const bt = ms(b.t);
