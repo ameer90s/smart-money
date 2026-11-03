@@ -200,7 +200,14 @@ async function runDay(day, sess) {
   const signals = new DayCollection(day, 'signals');
   const watchLog = readJSON(dayRel(day, 'watch.json'), []);
   const scanLog = readJSON(dayRel(day, 'scanner.json'), []);
+  const armedLog = readJSON(dayRel(day, 'armed.json'), []);
   const onEvent = (type, e) => {
+    if (type === 'armed' || type === 'armed_end') { // every armed touch setup and how it ended
+      if (type === 'armed') armedLog.push({ ...e, outcome: null });
+      else { const a = [...armedLog].reverse().find((x) => x.sym === e.sym && x.type === e.type && x.trigger === e.trigger && !x.outcome); if (a) Object.assign(a, { outcome: e.outcome, endAt: e.t, price: e.price }); }
+      writeJSON(dayRel(day, 'armed.json'), armedLog);
+      return;
+    }
     if (type === 'watch_add') watchLog.push({ sym: e.sym, t: e.t, score: e.score, direct: e.direct, why: e.why, feats: e.feats });
     if (type === 'watch_drop') { const w = [...watchLog].reverse().find((x) => x.sym === e.sym && !x.dropAt); if (w) { w.dropAt = e.t; w.dropReason = e.reason; } }
     writeJSON(dayRel(day, 'watch.json'), watchLog);

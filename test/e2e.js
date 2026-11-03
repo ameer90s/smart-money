@@ -60,6 +60,7 @@ const checks = [
   ['history uses consolidated (SIP) bars', (cap.feeds.sip || 0) > 0],
   ['only the proven setup is recommended (dip)', recs.length >= 1 && recs.every((r) => r.setup === 'DIP')],
   ['other setups are logged and audited as shadow', signals.some((s) => (s.why || []).includes('shadow'))],
+  ['every armed dip is logged with how it ended', (() => { const a = read(`days/${DAY}/armed.json`, []); return a.length >= 1 && a.some((x) => x.outcome === 'fired'); })()],
   ['dip plan: single target, sell everything there', recs.every((r) => r.plan.exit === 'full' && Math.abs(r.plan.targets[0].r - 1.5) < 0.01 && r.plan.stopAtr >= 0.99)],
   ['never asks for SIP newer than 15 minutes', cap.sipRecent === 0],
   ['wide IEX quote does not inflate the spread', signals.every((s) => s.plan.spread <= 0.1) && recs.every((r) => r.plan.spread <= 0.1)],

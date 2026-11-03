@@ -11,6 +11,7 @@ import { isCommonStock } from '../engine/universe.js';
 import { DEFAULTS } from '../engine/config.js';
 import { estSpread, effectiveSpread } from '../engine/market.js';
 import { matchProfile, profileSim } from '../engine/profiles.js';
+import { Watchlist } from '../engine/watchlist.js';
 
 let n = 0;
 const t = (name, fn) => { fn(); n++; console.log(`PASS  ${name}`); };
@@ -133,6 +134,24 @@ t('pattern profiles: match only their own setting, replay their own exit', () =>
   const ema = DEFAULTS.profiles.find((p) => p.id === 'EMA-a');
   const r = profileSim(up, b0, plan, ema, { timeStopMin: 60 });
   assert.equal(r.reason, 't1'); assert.ok(Math.abs(r.r - 2) < 1e-9, 'EMA-a: 2R target with a 1 ATR stop');
+});
+
+t('dip fires like the lab: first touch within 3 minutes, never above trigger + 0.25R', () => {
+  const ev = [], sig = [];
+  const wl = new Watchlist({ cfg: DEFAULTS, stream: { set() {} }, today: day, openMs: open, onSignal: (it, s) => sig.push(s.trigger), onEvent: (k, e) => ev.push([k, e.outcome || '']) });
+  const t0 = Date.now();
+  const mk = (trigger) => ({ s: { type: 'DIP', trigger, stopStruct: trigger - 0.2 }, at: t0, until: t0 + 180000 });
+  const it = { sym: 'X', fired: new Set(), pend: [mk(10)], armed: [], cross: {} };
+  wl.checkTouch(it, 9.99, t0 + 10000);
+  assert.equal(sig.length, 0, 'below trigger: wait');
+  wl.checkTouch(it, 10.02, t0 + 20000);
+  assert.deepEqual(sig, [10], 'fires on the first touch, no 20-second hold');
+  const it2 = { sym: 'Y', fired: new Set(), pend: [mk(20)], armed: [], cross: {} };
+  wl.checkTouch(it2, 20.2, t0 + 5000);
+  const it3 = { sym: 'Z', fired: new Set(), pend: [mk(30)], armed: [], cross: {} };
+  wl.checkTouch(it3, null, t0 + 181000);
+  assert.deepEqual(ev.map((x) => x[1]), ['fired', 'gapped', 'expired']);
+  assert.equal(sig.length, 1);
 });
 
 t('spread: liquidity estimate caps a wide IEX quote, a tight quote wins', () => {

@@ -3,7 +3,7 @@
 import path from 'node:path';
 
 export const VERSION = 'S1.3';
-export const APP_VERSION = '1.3.2';
+export const APP_VERSION = '1.3.3';
 
 export const DEFAULTS = {
   capital: 1000,          // virtual account, USD
@@ -40,6 +40,8 @@ export const DEFAULTS = {
   stopAtrMinBy: { DIP: 1.0 },  // per-setup minimum stop distance in 5-minute ATRs
   trialGross: true,            // trial week: probability/value gates before fees (fees still shown and charged)
   inplayMax: 20,               // names kept on the stream after leaving the watchlist (for the dip setup)
+  touchFire: ['DIP'],          // these fire as in the lab: price touches the trigger within touchWindowMin of the
+  touchWindowMin: 3,           // signal bar (no 20-second hold), and not more than 0.25R above it
   // Best setting per pattern found in the lab (31 Oct; chosen on the older 60 of 90 sessions, before
   // fees). Tracked as shadow only: matching live signals are tagged and their results recorded.
   profiles: [

@@ -124,6 +124,7 @@ export class Watchlist {
   async update(cands) {
     const cfg = this.cfg;
     await this.refreshSip();
+    for (const it of this.all()) this.checkTouch(it, null, now()); // expire stale arms on quiet names too
     const byS = Object.fromEntries(cands.map((c) => [c.sym, c]));
     for (const it of this.items.values()) {
       const c = byS[it.sym];
@@ -157,8 +158,39 @@ export class Watchlist {
     it.ctx = buildCtx(it.bars, this.openMs, { pdh: it.pdh, atrD: it.atrD });
     if (!it.ctx) { it.armed = []; return; }
     const only = it.inplay ? new Set(this.cfg.recSetups || []) : null; // in-play names: recommendable setups only
-    it.armed = detect(it.ctx).filter((s) => !it.fired.has(s.type) && (!only || only.has(s.type)));
+    const det = detect(it.ctx).filter((s) => !it.fired.has(s.type) && (!only || only.has(s.type)));
+    const touch = new Set(this.cfg.touchFire || []);
+    it.armed = det.filter((s) => !touch.has(s.type));
     for (const k of Object.keys(it.cross)) if (!it.armed.find((s) => s.type === k)) delete it.cross[k];
+    // Touch setups (the dip): as in the lab, the signal bar arms a trigger that stays valid for
+    // touchWindowMin even if later bars no longer show the pattern. Every arm is logged.
+    it.pend = it.pend || [];
+    const t0 = now(), win = (this.cfg.touchWindowMin || 3) * 60000;
+    for (const s of det.filter((x) => touch.has(x.type))) {
+      if (it.pend.some((x) => x.s.type === s.type && Math.abs(x.s.trigger - s.trigger) < 1e-9)) continue;
+      it.pend.push({ s, at: t0, until: t0 + win });
+      this.onEvent('armed', { sym: it.sym, type: s.type, trigger: s.trigger, stop: s.stopStruct, inplay: !!it.inplay, t: t0, until: t0 + win });
+    }
+  }
+
+  // Touch setups: fire on the first touch within the window (not above trigger + 0.25R); log why not otherwise.
+  checkTouch(it, p, t) {
+    if (!it.pend || !it.pend.length) return;
+    const keep = [];
+    for (const x of it.pend) {
+      const s = x.s;
+      const end = (outcome) => this.onEvent('armed_end', { sym: it.sym, type: s.type, trigger: s.trigger, outcome, price: p, t });
+      if (it.fired.has(s.type)) { end('already'); continue; }
+      if (t > x.until) { end('expired'); continue; }
+      if (p != null && p >= s.trigger) {
+        const R = s.trigger - s.stopStruct;
+        if (p <= s.trigger + 0.25 * R) { it.fired.add(s.type); end('fired'); this.onSignal(it, s); }
+        else end('gapped');
+        continue;
+      }
+      keep.push(x);
+    }
+    it.pend = keep;
   }
 
   onPrice(sym, p, t) {
@@ -166,6 +198,7 @@ export class Watchlist {
     if (!it || !p) return;
     it.last = p;
     const cfg = this.cfg;
+    this.checkTouch(it, p, t);
     for (const s of it.armed) {
       if (it.fired.has(s.type)) continue;
       const R = s.trigger - s.stopStruct;
