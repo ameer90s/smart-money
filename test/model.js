@@ -75,13 +75,13 @@ try {
     assert.equal(saved.samples.length, model.load().samples.length);
   });
   await t('AI proposals carry a reason and an effect, and are never applied by themselves', async () => {
-    for (let i = 0; i < 20; i++) model.addSample({ setup: 'DIP', mfe: i < 4 ? 2 : 0.4, src: 'seed' });
+    for (let i = 0; i < 40; i++) model.addSample({ setup: 'DIP', mfe: i < 8 ? 2 : 0.4, r: i < 8 ? 1.5 : -0.6, src: 'seed' }); // average -0.18R
     const { rulesReport } = await import('../engine/analyst.js');
     const rep = rulesReport('2026-10-30');
     const p = rep.proposals.find((x) => x.id === 'pause-DIP');
     assert.ok(p, 'pause proposal for a weak recommendable setup');
     assert.ok(!rep.proposals.some((x) => x.id === 'pause-ORB5' || x.id === 'pause-VWAP'), 'no pause proposals for logged-only setups');
-    assert.ok(p.why && /حالة|حالات/.test(p.why) && p.effect);
+    assert.ok(p.why && /حالة|حالات/.test(p.why) && /متوسط النتيجة/.test(p.why) && p.effect, 'one-target setups are judged on average result');
     assert.ok(rep.proposals.every((x) => !('status' in x) || x.status === 'new'));
   });
   console.log(`(replay added ${first} signals: ${model.load().samples.filter((x) => x.src === 'replay').map((x) => `${x.sym}/${x.setup}`).join(', ')})`);

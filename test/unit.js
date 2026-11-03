@@ -10,6 +10,7 @@ import { volumeShare, aggregate } from '../engine/indicators.js';
 import { isCommonStock } from '../engine/universe.js';
 import { DEFAULTS } from '../engine/config.js';
 import { estSpread, effectiveSpread } from '../engine/market.js';
+import { matchProfile, profileSim } from '../engine/profiles.js';
 
 let n = 0;
 const t = (name, fn) => { fn(); n++; console.log(`PASS  ${name}`); };
@@ -119,6 +120,19 @@ t('dip plan: stop at least 1 ATR, one target at 1.5R, sell everything there', ()
   const flat = Array.from({ length: 70 }, (_, i) => ({ t: new Date(b0 + i * 60000).toISOString(), o: 10.05, h: 10.1, l: 9.9, c: 10.05, v: 1 }));
   const r2 = simulate(flat, b0, pl, { timeStopMin: 60 });
   assert.equal(r2.reason, 'timestop'); assert.ok(Math.abs(r2.r - 0.25) < 1e-9);
+});
+
+t('pattern profiles: match only their own setting, replay their own exit', () => {
+  const plan = { fails: [], ext: 0.8, entry: 10, stop: 9.8, R: 0.2, atr5: 0.3, exit: 'scale', targets: [{ price: 10.3 }, { price: 10.5 }, { price: 10.8 }] };
+  assert.equal(matchProfile(DEFAULTS, { setup: 'VWAP', plan, minAfterOpen: 45, feats: { rvol: 1.5, chg: 3 }, regime: 'up' }), 'VWAP-a');
+  assert.equal(matchProfile(DEFAULTS, { setup: 'VWAP', plan, minAfterOpen: 45, feats: { rvol: 1.5, chg: 3 }, regime: 'flat' }), null, 'needs an up market');
+  assert.equal(matchProfile(DEFAULTS, { setup: 'VWAP', plan: { ...plan, fails: ['spread'] }, minAfterOpen: 45, feats: { rvol: 1.5 }, regime: 'up' }), null, 'structural fail');
+  assert.equal(matchProfile(DEFAULTS, { setup: 'ORB15', plan: { ...plan, ext: 0.3 }, minAfterOpen: 20, feats: { chg: 6 }, regime: 'down' }), 'ORB15-a');
+  const b0 = Date.parse('2026-11-02T15:00:00Z');
+  const up = Array.from({ length: 10 }, (_, i) => ({ t: new Date(b0 + i * 60000).toISOString(), o: 10 + i * 0.1, h: 10.1 + i * 0.1, l: 9.95 + i * 0.1, c: 10.05 + i * 0.1, v: 1 }));
+  const ema = DEFAULTS.profiles.find((p) => p.id === 'EMA-a');
+  const r = profileSim(up, b0, plan, ema, { timeStopMin: 60 });
+  assert.equal(r.reason, 't1'); assert.ok(Math.abs(r.r - 2) < 1e-9, 'EMA-a: 2R target with a 1 ATR stop');
 });
 
 t('spread: liquidity estimate caps a wide IEX quote, a tight quote wins', () => {

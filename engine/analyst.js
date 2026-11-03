@@ -58,6 +58,8 @@ export function rulesReport(day) {
   for (const r of closed.filter((x) => x.result.net < 0)) bullets.push(`سبب خسارة ${r.sym}: ${CAUSE_AR[classifyLoss(r)]}.`);
   const tMissed = today.sig.filter((s) => !s.accepted && s.sim && s.sim.t1);
   if (tMissed.length) bullets.push(`فرص فاتت اليوم ووصلت الهدف 1: ${tMissed.slice(0, 4).map((s) => `${s.sym} (${(s.why || []).map((f) => FAIL_AR[f] || f).join('، ')})`).join(' · ')}.`);
+  const tProf = today.sig.filter((s) => s.profile && s.profileSim);
+  if (tProf.length) bullets.push(`إشارات طابقت أفضل إعداد لنمطها (للمراقبة): ${tProf.slice(0, 5).map((s) => `${s.sym} ${s.setup} ${s.profileSim.r >= 0 ? '+' : ''}${s.profileSim.r.toFixed(2)}R`).join(' · ')}.`);
   const tAll = today.sig.filter((s) => s.sim);
   if (tAll.length) bullets.push(`إشارات اليوم ${tAll.length}: متوسط ${(tAll.reduce((a, s) => a + s.sim.r, 0) / tAll.length).toFixed(2)}R بالمحاكاة.`);
 
@@ -70,8 +72,18 @@ export function rulesReport(day) {
     if (xs.length < 5) continue;
     props.push({ id: `relax-${f}`, aspect: f === 'window' ? 'التوقيت' : f === 'prob' || f === 'ev' ? 'الاحتمال' : 'الاكتشاف', text: `راجع شرط «${FAIL_AR[f] || f}»: رفض ${cn(xs.length, 'فرص', 'فرصة')} وصلت الهدف 1`, why: `الشرط رفض ${cn(xs.length, 'إشارات', 'إشارة')}، ولما أعدت تشغيلها على البيانات الكاملة وصلت الهدف 1، ومتوسطها ${avgR(xs).toFixed(2)}R`, effect: `تخفيف هالشرط يزيد التوصيات. نحتاج نتأكد إنه ما يدخل صفقات خاسرة أكثر من الفرص اللي يكسبها` });
   }
+  // Pause proposals only for setups that can recommend. A one-target setup is judged on its
+  // average result (time exits included), not on how often it reaches the target.
   const per = model.perSetup();
-  for (const [s, o] of Object.entries(per)) if (o.n >= 15 && o.t15 < 0.3 && (DEFAULTS.recSetups || []).includes(s)) props.push({ id: `pause-${s}`, aspect: 'النمط', text: `أوقف نمط ${s} مؤقتاً`, why: `وصل 1.5R في ${Math.round(o.t15 * 100)}% بس من ${cn(o.n, 'حالات', 'حالة')}، والنمط اللي ما عنده أي ميزة يوصل تقريباً 40%`, effect: 'ما يطلع توصيات من هالنمط. حالياً هو أصلاً تحت حد الثقة 45%، فالإيقاف يثبّت الوضع لين تتحسن أرقامه' });
+  for (const s of DEFAULTS.recSetups || []) {
+    if ((DEFAULTS.fixedR || {})[s]) {
+      const ex = model.expectancy(s);
+      if (ex.n >= 30 && ex.ev < 0) props.push({ id: `pause-${s}`, aspect: 'النمط', text: `أوقف نمط ${s} مؤقتاً`, why: `متوسط النتيجة ${ex.ev.toFixed(2)}R قبل العمولة على ${cn(ex.n, 'حالات', 'حالة')} (يشمل الخروج بالوقت)، يعني خاسر`, effect: 'ما يطلع توصيات من هالنمط لين يرجع متوسطه موجب' });
+    } else {
+      const o = per[s];
+      if (o && o.n >= 15 && o.t15 < 0.3) props.push({ id: `pause-${s}`, aspect: 'النمط', text: `أوقف نمط ${s} مؤقتاً`, why: `وصل 1.5R في ${Math.round(o.t15 * 100)}% بس من ${cn(o.n, 'حالات', 'حالة')}، والنمط اللي ما عنده أي ميزة يوصل تقريباً 40%`, effect: 'ما يطلع توصيات من هالنمط لين تتحسن أرقامه' });
+    }
+  }
   const byTod = {};
   for (const s of audited) (byTod[model.todBucket(s.minAfterOpen || 60)] = byTod[model.todBucket(s.minAfterOpen || 60)] || []).push(s);
   const TOD_AR = { open: 'أول 30 دقيقة', morning: 'الصباح', midday: 'منتصف اليوم', late: 'آخر الجلسة' };
@@ -81,7 +93,7 @@ export function rulesReport(day) {
 }
 
 async function claudeReport(day, base) {
-  if (!ENV.anthropicKey) return null;
+  if (!ENV.anthropicKey) return { error: 'ما فيه مفتاح ANTHROPIC_API_KEY' };
   const { recs, sig } = recent(5);
   const compact = {
     day, rules: base,
@@ -100,21 +112,30 @@ async function claudeReport(day, base) {
     const text = (r.content || []).map((c) => c.text || '').join('');
     const j = JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1));
     return { bullets: (j.bullets || []).slice(0, 8), proposals: (j.proposals || []).slice(0, 6).map((p, i) => ({ id: `ai-${day}-${i}`, aspect: p.aspect, text: p.text, why: p.why, effect: p.effect, by: 'claude' })) };
-  } catch (e) { warn('claude analyst', e); return null; }
+  } catch (e) {
+    // Keep the reason in the report so a failed key, empty balance or bad model name is visible
+    // (the HTTP error carries the status and the start of Anthropic's message, never the key).
+    warn('claude analyst', e);
+    return { error: String((e && e.message) || e).slice(0, 240) };
+  }
 }
 
 export async function runAnalyst(day) {
   const base = rulesReport(day);
-  const ai = await claudeReport(day, base);
+  const res = await claudeReport(day, base);
+  const ai = res && !res.error ? res : null;
   const prev = readJSON('proposals.json', []);
   const byId = Object.fromEntries(prev.map((p) => [p.id, p]));
+  const fresh = new Set(base.proposals.map((p) => p.id));
   for (const p of [...base.proposals, ...((ai && ai.proposals) || [])]) {
     if (!byId[p.id]) byId[p.id] = { ...p, status: 'new', createdAt: Date.now(), day };
     else Object.assign(byId[p.id], { why: p.why, effect: p.effect, text: p.text, lastSeen: day });
   }
+  // A rule-based proposal that the rules no longer support expires instead of waiting forever.
+  for (const p of Object.values(byId)) if (p.status === 'new' && p.by !== 'claude' && !fresh.has(p.id)) { p.status = 'expired'; p.expiredAt = Date.now(); }
   const proposals = Object.values(byId).slice(-40);
   writeJSON('proposals.json', proposals);
-  const report = { ...base, bullets: ai ? [...ai.bullets] : base.bullets, source: ai ? 'claude' : 'rules' };
+  const report = { ...base, bullets: ai ? [...ai.bullets] : base.bullets, source: ai ? 'claude' : 'rules', ...(res && res.error ? { claudeError: res.error } : {}) };
   writeJSON(dayRel(day, 'analyst.json'), report);
   return { report, proposals };
 }

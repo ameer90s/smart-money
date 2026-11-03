@@ -3,7 +3,7 @@
 import path from 'node:path';
 
 export const VERSION = 'S1.3';
-export const APP_VERSION = '1.3.1';
+export const APP_VERSION = '1.3.2';
 
 export const DEFAULTS = {
   capital: 1000,          // virtual account, USD
@@ -40,6 +40,15 @@ export const DEFAULTS = {
   stopAtrMinBy: { DIP: 1.0 },  // per-setup minimum stop distance in 5-minute ATRs
   trialGross: true,            // trial week: probability/value gates before fees (fees still shown and charged)
   inplayMax: 20,               // names kept on the stream after leaving the watchlist (for the dip setup)
+  // Best setting per pattern found in the lab (31 Oct; chosen on the older 60 of 90 sessions, before
+  // fees). Tracked as shadow only: matching live signals are tagged and their results recorded.
+  profiles: [
+    { id: 'ORB5-a', setup: 'ORB5', tod: [0, 30], minRvol: 2, minChg: 5, exit: 'r15', desc: 'أول 30 دقيقة · حجم ×2 وفوق · مرتفع 5% وفوق · هدف 1.5R', lab: { train: 0.09, test: -0.11 } },
+    { id: 'ORB15-a', setup: 'ORB15', tod: [0, 30], maxExt: 0.5, minChg: 5, exit: 'mgmt', desc: 'أول 30 دقيقة · قريب من VWAP (أقل من 0.5 ATR) · مرتفع 5% وفوق', lab: { train: 0.40, test: 0.12 } },
+    { id: 'VWAP-a', setup: 'VWAP', tod: [30, 120], regime: ['up'], maxExt: 1.0, maxRvol: 2, exit: 'mgmt', desc: '10:00–11:30 · السوق صاعد · قريب من VWAP (أقل من 1 ATR) · حجم أقل من ×2', lab: { train: 0.28, test: 0.59 } },
+    { id: 'FLAG-a', setup: 'FLAG', regimeNot: ['down'], minChg: 5, exit: 'mgmt', desc: 'السوق مو هابط · مرتفع 5% وفوق', lab: { train: 0.07, test: 0.06 } },
+    { id: 'EMA-a', setup: 'EMA', tod: [30, 1e9], maxRvol: 2, stopAtr: 1.0, exit: 'r2', desc: 'بعد 10:00 · حجم أقل من ×2 · وقف 1 ATR وفوق · هدف 2R', lab: { train: 0.04, test: 0.11 } },
+  ],
   allowDoubtful: false,
   useNews: true,
   notifyRec: true,

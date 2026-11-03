@@ -20,6 +20,7 @@ import { buildWeek, loadWeek, dayRules, recordOutcomes } from './events.js';
 import { auditDay } from './audit.js';
 import { bootstrap } from './backtest.js';
 import { runLab } from './lab.js';
+import { matchProfile, profilesSummary } from './profiles.js';
 import { runAnalyst, CAUSE_AR, FAIL_AR } from './analyst.js';
 import { finnhub } from './finnhub.js';
 import * as model from './model.js';
@@ -129,6 +130,7 @@ function buildLive() {
     stats: { today: rt.recs ? rt.recs.stats() : null, week: weekStats(day), targetUsd: +(cfg.capital * 0.01).toFixed(2), capital: cfg.capital },
     analyst: latestAnalystDay ? readJSON(dayRel(latestAnalystDay, 'analyst.json'), null) : null,
     proposals: readJSON('proposals.json', []).slice(-20),
+    profiles: profilesSummary(cfg),
     model: model.summary(),
     strategy: { version: VERSION, params: strategyParams() },
     week: week ? { week: week.week, econ: week.econ, earnings: week.earnings, sessions: week.sessions, rules: dayRules(week, day) } : null,
@@ -233,9 +235,10 @@ async function runDay(day, sess) {
         for (const tg of p.targets) tg.netUsd = +(p.sizing.shares * (tg.price - p.entry) - p.sizing.fees).toFixed(2);
       }
       const accepted = why.length === 0;
-      const sig = { id: `${day}-${it.sym}-${setup.type}-${t}`, day, sym: it.sym, setup: setup.type, label: setup.label, firedAt: t, firedNy: ny(t).hm, plan: p, accepted, why, score: it.score, minAfterOpen: it.ctx.minAfterOpen, regime, feats: it.feats, version: VERSION };
+      const profile = matchProfile(cfg, { setup: setup.type, plan: p, minAfterOpen: it.ctx.minAfterOpen, feats: it.feats, regime });
+      const sig = { id: `${day}-${it.sym}-${setup.type}-${t}`, day, sym: it.sym, setup: setup.type, label: setup.label, firedAt: t, firedNy: ny(t).hm, plan: p, accepted, why, score: it.score, minAfterOpen: it.ctx.minAfterOpen, regime, feats: it.feats, version: VERSION, ...(profile ? { profile } : {}) };
       signals.upsert(sig); signals.flush();
-      log(`signal ${it.sym} ${setup.type} ${accepted ? 'ACCEPTED' : `rejected (${why.join(',')})`}`);
+      log(`signal ${it.sym} ${setup.type} ${accepted ? 'ACCEPTED' : `rejected (${why.join(',')})`}${profile ? ` · profile ${profile}` : ''}`);
       if (accepted) {
         recs.issue({ it, setup, plan: p, feats: it.feats, market: rt.mkt, sh: recordOf(it.sym), events: R.events });
         publishLive(true);

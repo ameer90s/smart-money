@@ -4,6 +4,7 @@ import { alpaca } from './alpaca.js';
 import { isoNy, nyToUtc, hmToMin } from './clock.js';
 import { DayCollection, readJSON, writeJSON, dayRel } from './store.js';
 import { simulate } from './simulate.js';
+import { profileSim, recordProfiles } from './profiles.js';
 import { ms } from './indicators.js';
 import * as model from './model.js';
 import { log, warn } from './log.js';
@@ -27,6 +28,7 @@ export async function auditDay(day, cfg) {
     const b = bars[s.sym] || [];
     const sim = simulate(b, s.firedAt, s.plan, { flatMs, timeStopMin: cfg.timeStopMin });
     s.sim = sim;
+    if (s.profile) { const prof = (cfg.profiles || []).find((p) => p.id === s.profile); if (prof) s.profileSim = profileSim(b, s.firedAt, s.plan, prof, { flatMs, timeStopMin: cfg.timeStopMin }); }
     signals.upsert(s);
     const structuralFail = (s.plan.fails || []).some((f) => STRUCTURAL.has(f));
     if (!structuralFail && !s.sampled) {
@@ -50,6 +52,8 @@ export async function auditDay(day, cfg) {
   }
   writeJSON(dayRel(day, 'watch.json'), watch);
   signals.flush(); recs.flush();
+  const nProf = recordProfiles(cfg, signals.all());
+  if (nProf) log(`profiles: ${nProf} new tracked signals`);
   model.markTrained(); model.save();
   log(`audit ${day}: ${n} signals, ${recs.all().length} recs`);
   return { n, recs: recs.all().length };
