@@ -1,1 +1,1 @@
-[{"sym":"BRKR","type":"DIP","trigger":61.65,"stop":60.4677,"inplay":true,"t":1793804760180,"until":1793804940180,"outcome":"fired","endAt":1793804832120,"price":61.67}]
+[{"sym":"BRKR","type":"DIP","trigger":61.65,"stop":60.4677,"inplay":true,"t":1793804760180,"until":1793804940180,"outcome":"fired","endAt":1793804832120,"price":61.67},{"sym":"FSLR","type":"DIP","trigger":201.935,"stop":200.7464,"inplay":true,"t":1793806380128,"until":1793806560128,"outcome":"fired","endAt":1793806380103,"price":202.2}]
