@@ -8,7 +8,7 @@ import * as model from './model.js';
 import { warn } from './log.js';
 
 const CAUSE_AR = { noise: 'وقف داخل ضجيج السهم', ext: 'دخول ممتد بعد دفعة', market: 'السوق انعكس', late: 'اكتشاف متأخر', spread: 'سيولة أو سبريد', time: 'لم يتحرك (خروج بالوقت)', other: 'أخرى' };
-const FAIL_AR = { prob: 'الاحتمال', ev: 'القيمة المتوقعة', rr: 'العائد للمخاطرة', cost: 'التكلفة', stop: 'وقف بعيد', spread: 'السبريد', ext: 'الامتداد', window: 'خارج الوقت', max: 'الحد اليومي', dailyLoss: 'حد الخسارة', cooldown: 'التهدئة', dup: 'تكرار', earnings: 'يوم أرباح', market: 'السوق هابط', shadow: 'نمط للمراقبة فقط' };
+const FAIL_AR = { prob: 'الاحتمال', ev: 'القيمة المتوقعة', rr: 'العائد للمخاطرة', cost: 'التكلفة', stop: 'وقف بعيد', spread: 'السبريد', ext: 'الامتداد', window: 'خارج الوقت', max: 'الحد اليومي', dailyLoss: 'حد الخسارة', cooldown: 'التهدئة', dup: 'تكرار', earnings: 'يوم أرباح', market: 'السوق هابط', shadow: 'نمط للمراقبة فقط', paused: 'نمط موقوف بقرارك' };
 
 // Arabic counted nouns: 3–10 take the plural, 11 and up the singular.
 const cn = (k, plural, singular) => `${k} ${k >= 3 && k <= 10 ? plural : singular}`;
@@ -109,7 +109,10 @@ async function claudeReport(day, base) {
       body: JSON.stringify({ model: ENV.anthropicModel, max_tokens: 1500, messages: [{ role: 'user', content: prompt }] }),
       perMin: 5, tries: 2, timeout: 60000,
     });
-    const text = (r.content || []).map((c) => c.text || '').join('');
+    const blocks = Array.isArray(r.content) ? r.content : [];
+    const text = blocks.filter((c) => c.type === 'text').map((c) => c.text || '').join('');
+    // No text back: say what came back instead of a bare JSON parse error.
+    if (!text.includes('{')) throw new Error(`رد Claude بدون نص (stop=${r.stop_reason || '-'}, blocks=${blocks.map((c) => c.type).join(',') || '-'}${r.error ? `, ${r.error.type}: ${r.error.message}` : ''})`);
     const j = JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1));
     return { bullets: (j.bullets || []).slice(0, 8), proposals: (j.proposals || []).slice(0, 6).map((p, i) => ({ id: `ai-${day}-${i}`, aspect: p.aspect, text: p.text, why: p.why, effect: p.effect, by: 'claude' })) };
   } catch (e) {

@@ -234,6 +234,9 @@ async function runDay(day, sess) {
       if (p.exit !== 'full' && regime === 'down' && p.targets[0].prob < eff.probMinT1 + 0.1) why.push('market');
       // Setups without a proven edge are logged and audited (to keep learning) but never recommended.
       if (cfg.recSetups && !cfg.recSetups.includes(setup.type)) why.push('shadow');
+      // A pause the user approved on an analyst proposal stops recommendations for that setup (it is still logged).
+      const paused = readJSON('proposals.json', []).filter((x) => x.status === 'approved' && String(x.id).startsWith('pause-')).map((x) => String(x.id).slice(6));
+      if (paused.includes(setup.type)) why.push('paused');
       if (R.halfSizeUntil && ny(t).min < hmToMin(R.halfSizeUntil)) {
         p.sizing.shares = Math.floor((p.sizing.shares / 2) * 100) / 100;
         p.sizing.cost = +(p.sizing.shares * p.entry).toFixed(2);
