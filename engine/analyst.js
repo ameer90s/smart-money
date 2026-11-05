@@ -106,7 +106,7 @@ async function claudeReport(day, base) {
     const r = await request(`${ENV.anthropicUrl}/v1/messages`, {
       method: 'POST',
       headers: { 'x-api-key': ENV.anthropicKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-      body: JSON.stringify({ model: ENV.anthropicModel, max_tokens: 1500, messages: [{ role: 'user', content: prompt }] }),
+      body: JSON.stringify({ model: ENV.anthropicModel, max_tokens: 6000, messages: [{ role: 'user', content: prompt }] }),
       perMin: 5, tries: 2, timeout: 60000,
     });
     const blocks = Array.isArray(r.content) ? r.content : [];
