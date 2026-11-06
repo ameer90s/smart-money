@@ -17,10 +17,6 @@ on:
         description: 'Stop at New York time HH:MM'
         default: '16:45'
   schedule:
-    - cron: '13 7 * * 1-5'
-    - cron: '13 8 * * 1-5'
-    - cron: '13 9 * * 1-5'
-    - cron: '13 10 * * 1-5'
     - cron: '13 12 * * 1-5'
     - cron: '7 10 * * 6'
 

@@ -8,7 +8,7 @@ import * as model from './model.js';
 import { warn } from './log.js';
 
 const CAUSE_AR = { noise: 'وقف داخل ضجيج السهم', ext: 'دخول ممتد بعد دفعة', market: 'السوق انعكس', late: 'اكتشاف متأخر', spread: 'سيولة أو سبريد', time: 'لم يتحرك (خروج بالوقت)', other: 'أخرى' };
-const FAIL_AR = { prob: 'الاحتمال', ev: 'القيمة المتوقعة', rr: 'العائد للمخاطرة', cost: 'التكلفة', stop: 'وقف بعيد', spread: 'السبريد', ext: 'الامتداد', window: 'خارج الوقت', max: 'الحد اليومي', dailyLoss: 'حد الخسارة', cooldown: 'التهدئة', dup: 'تكرار', earnings: 'يوم أرباح', market: 'السوق هابط', shadow: 'نمط للمراقبة فقط', paused: 'نمط موقوف بقرارك' };
+const FAIL_AR = { prob: 'الاحتمال', ev: 'القيمة المتوقعة', rr: 'العائد للمخاطرة', cost: 'التكلفة', stop: 'وقف بعيد', spread: 'السبريد', ext: 'الامتداد', window: 'خارج الوقت', max: 'الحد اليومي', dailyLoss: 'حد الخسارة', cooldown: 'التهدئة', dup: 'تكرار', earnings: 'يوم أرباح', market: 'السوق هابط', shadow: 'نمط للمراقبة فقط', paused: 'نمط موقوف بقرارك', busy: 'صفقة مفتوحة' };
 
 // Arabic counted nouns: 3–10 take the plural, 11 and up the singular.
 const cn = (k, plural, singular) => `${k} ${k >= 3 && k <= 10 ? plural : singular}`;

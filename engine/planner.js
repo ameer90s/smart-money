@@ -90,7 +90,7 @@ export function plan(setup, ctx, q, cfg, feats = {}) {
     fixedInfo = { win: ex.win == null ? null : round(ex.win, 3), nExp: ex.n };
     if ((t1.p - entry) < cfg.costMult * costPerShare) fails.push('cost');
     if (!enough && p1 < 1 / (1 + fixedK) + 0.02) fails.push('prob');
-    if (ev < 0.05) fails.push('ev');
+    if (ev < 0.10) fails.push('ev');
   } else {
     if (targets[0].netR < cfg.rrMinNet) fails.push('rr');
     if ((t1.p - entry) < cfg.costMult * costPerShare) fails.push('cost');

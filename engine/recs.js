@@ -34,6 +34,8 @@ export class Recs {
     if (st.issued >= cfg.maxRecsDay) why.push('max');
     if (st.net <= -cfg.dailyLossStop) why.push('dailyLoss');
     if (now() < this.cooldownUntil) why.push('cooldown');
+    // One open trade at a time: a new recommendation waits until the open one is closed.
+    if (this.active().length) why.push('busy');
     if (this.all().some((r) => r.sym === sym)) why.push('dup');
     return why;
   }
