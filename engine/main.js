@@ -233,7 +233,11 @@ async function runDay(day, sess) {
       // The dip setup did best on down days in the lab, so the down-market rule applies to the others only.
       if (p.exit !== 'full' && regime === 'down' && p.targets[0].prob < eff.probMinT1 + 0.1) why.push('market');
       // Setups without a proven edge are logged and audited (to keep learning) but never recommended.
-      if (cfg.recSetups && !cfg.recSetups.includes(setup.type)) why.push('shadow');
+      // Any setup may recommend once the model has enough trades for it and its expected value (adjusted for the market state) is high enough.
+      if (cfg.recSetups && !cfg.recSetups.includes(setup.type)) {
+        const ex = model.expectancy(setup.type, { regime });
+        if (!(ex.n >= (cfg.recMinN || 30) && ex.ev >= (cfg.recMinEv || 0.10))) why.push('shadow');
+      }
       // A pause the user approved on an analyst proposal stops recommendations for that setup (it is still logged).
       const paused = readJSON('proposals.json', []).filter((x) => x.status === 'approved' && String(x.id).startsWith('pause-')).map((x) => String(x.id).slice(6));
       if (paused.includes(setup.type)) why.push('paused');

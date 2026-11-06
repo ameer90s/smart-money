@@ -35,7 +35,9 @@ export const DEFAULTS = {
   confirmSec: 20,         // price must hold above the trigger this long
   timeStopMin: 60,
   // S1.3 — from the walk-forward lab (31 Oct): only the dip setup showed an edge before costs.
-  recSetups: ['DIP'],          // setups that may become recommendations; the rest are logged and audited only
+  recSetups: ['DIP'],          // setups that always may become recommendations
+  recMinN: 30,                 // other setups qualify once the model has this many trades for them...
+  recMinEv: 0.10,              // ...and their expected value (R, shrunk, adjusted for the market state) reaches this
   fixedR: { DIP: 1.5 },        // single target at k·R, sell everything there (as tested in the lab)
   stopAtrMinBy: { DIP: 1.0 },  // per-setup minimum stop distance in 5-minute ATRs
   trialGross: true,            // trial week: probability/value gates before fees (fees still shown and charged)
