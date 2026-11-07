@@ -226,7 +226,9 @@ async function runDay(day, sess) {
       const t = now();
       const regime = rt.mkt ? rt.mkt.regime : 'flat';
       const R = rules();
-      const eff = { ...cfg, probMinT1: cfg.probMinT1 + (R.probBoost || 0), recTo: minToHm(recToMin) };
+      // Size from the current balance: week start capital plus this week's closed net so far (Monday starts at capital).
+      const equity = +(cfg.capital + weekStats(ny(t).ymd).net).toFixed(2);
+      const eff = { ...cfg, capital: equity, probMinT1: cfg.probMinT1 + (R.probBoost || 0), recTo: minToHm(recToMin) };
       const p = makePlan(setup, it.ctx, { spread: it.spread }, eff, { score: it.score, regime });
       const why = [...p.fails, ...recs.guard(it.sym, eff)];
       if ((R.earningsToday || []).includes(it.sym)) why.push('earnings');
