@@ -128,18 +128,22 @@ export async function runAnalyst(day) {
   const base = rulesReport(day);
   const res = await claudeReport(day, base);
   const ai = res && !res.error ? res : null;
+  // Daily reports are for information only. Improvement proposals come from the Friday (weekly) review,
+  // so small daily samples do not keep changing the strategy.
+  const weekly = new Date(`${day}T12:00:00Z`).getUTCDay() === 5;
+  if (!weekly) base.proposals = [];
   const prev = readJSON('proposals.json', []);
   const byId = Object.fromEntries(prev.map((p) => [p.id, p]));
   const fresh = new Set(base.proposals.map((p) => p.id));
-  for (const p of [...base.proposals, ...((ai && ai.proposals) || [])]) {
+  for (const p of [...base.proposals, ...(weekly && ai ? ai.proposals || [] : [])]) {
     if (!byId[p.id]) byId[p.id] = { ...p, status: 'new', createdAt: Date.now(), day };
     else Object.assign(byId[p.id], { why: p.why, effect: p.effect, text: p.text, lastSeen: day });
   }
   // A rule-based proposal that the rules no longer support expires instead of waiting forever.
-  for (const p of Object.values(byId)) if (p.status === 'new' && p.by !== 'claude' && !fresh.has(p.id)) { p.status = 'expired'; p.expiredAt = Date.now(); }
+  if (weekly) for (const p of Object.values(byId)) if (p.status === 'new' && p.by !== 'claude' && !fresh.has(p.id)) { p.status = 'expired'; p.expiredAt = Date.now(); }
   const proposals = Object.values(byId).slice(-40);
   writeJSON('proposals.json', proposals);
-  const report = { ...base, bullets: ai ? [...ai.bullets] : base.bullets, source: ai ? 'claude' : 'rules', ...(res && res.error ? { claudeError: res.error } : {}) };
+  const report = { ...base, kind: weekly ? 'weekly' : 'daily', bullets: ai ? [...ai.bullets] : base.bullets, source: ai ? 'claude' : 'rules', ...(res && res.error ? { claudeError: res.error } : {}) };
   writeJSON(dayRel(day, 'analyst.json'), report);
   return { report, proposals };
 }

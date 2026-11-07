@@ -262,7 +262,7 @@ function weekTarget() {
   const cap = (L && L.stats && L.stats.capital) || 1000;
   const p = Math.max(0, Math.min(100, (w.net / tgt) * 100));
   return `<section class="card"><div class="row"><span class="h2" style="font-size:14px">هدف الأسبوع</span><span class="tiny">1% من ${cap.toLocaleString('en-US')}$ صافي بعد العمولة</span></div>
-<div class="row" style="justify-content:flex-start;align-items:baseline;gap:8px"><span class="mono" style="font-size:26px;color:var(--${w.net >= 0 ? 'up' : 'down'})">${usd(w.net)}</span><span class="sub">من ${tgt}$ · ${Math.round((w.net / tgt) * 100)}%</span></div>
+<div class="row" style="justify-content:flex-start;align-items:baseline;gap:8px"><span class="mono" style="font-size:26px;color:var(--${w.net >= 0 ? 'up' : 'down'})">${usd(w.net)}</span><span class="sub">الرصيد ${(cap + w.net).toLocaleString('en-US', { maximumFractionDigits: 2 })}$ من ${cap.toLocaleString('en-US')}$ · الهدف ${tgt}$ (${Math.round((w.net / tgt) * 100)}%)</span></div>
 <div class="bar" style="height:10px"><i class="grad" style="width:${p}%"></i></div>
 <div class="grid4" style="font-size:12px"><span class="c-muted">صفقات <b style="color:var(--text)">${w.trades}</b></span><span class="c-muted">ربح <b class="c-up">${w.wins}</b></span><span class="c-muted">خسارة <b class="c-down">${w.losses}</b></span><span class="c-muted">تراجع <b style="color:var(--text)">${n2((w.ddUsd / cap) * 100, 1)}%</b></span></div></section>`;
 }
