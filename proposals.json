@@ -4,10 +4,12 @@
     "aspect": "النمط",
     "text": "أوقف نمط VWAP مؤقتاً",
     "why": "وصل 1.5R في 29% فقط من 35 حالة",
-    "status": "expired",
+    "status": "approved",
     "createdAt": 1793391435998,
     "day": "2026-10-30",
-    "expiredAt": 1793740634548
+    "expiredAt": 1793740634548,
+    "decidedAt": 1794145617595,
+    "note": "مراقبة فقط (8 نوفمبر، بقرار المستخدم)"
   },
   {
     "id": "pause-ORB5",
