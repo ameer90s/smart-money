@@ -185,8 +185,10 @@ async function labDay(sess, env) {
         const p = makePlan(s0, ctx, { spread: spread(s0.trigger) }, cfg, { score: sc, regime });
         const fails = p.fails.filter((f) => STRUCTURAL.has(f));
         const out = {};
+        let mgReason = null;
         for (const [ex, k] of Object.entries(EXITS)) {
-          out[ex] = k == null ? simulate(bars, fillAt, p, { flatMs, timeStopMin: cfg.timeStopMin }).r : simFixed(bars, fillAt, p.entry, p.stop, p.entry + k * p.R, cfg.timeStopMin, flatMs);
+          if (k == null) { const sm = simulate(bars, fillAt, p, { flatMs, timeStopMin: cfg.timeStopMin }); out[ex] = sm.r; mgReason = sm.reason; }
+          else out[ex] = simFixed(bars, fillAt, p.entry, p.stop, p.entry + k * p.R, cfg.timeStopMin, flatMs);
         }
         if (firstOfType) {
           // One row per stock, day and setup (first fill), with everything needed to re-cost and
@@ -197,6 +199,7 @@ async function labDay(sess, env) {
             d: day, s, ty: s0.type, fams: c.fams, w: inWatch ? 1 : 0, e: p.entry, R: +p.R.toFixed(4), sp: p.spread, a5: +ctx.a5.toFixed(4),
             ext: +s0.ext.toFixed(2), chg: +((ctx.last.c / dc.pc - 1) * 100).toFixed(2), rv: rvol == null ? null : +rvol.toFixed(2), sc, ma: Math.round(ctx.minAfterOpen), rg: regime,
             dv: +((ctx.vwap - ctx.last.c) / ctx.a5).toFixed(2), fails,
+            et: +(ny(fillAt).min / 60).toFixed(2), xr: mgReason, // entry time (NY hour) and how the managed exit ended
             x: Object.fromEntries(Object.entries(out).map(([k, v]) => [k, +v.toFixed(3)])),
             w1: wide(Math.max(p.R, ctx.a5)), w2: wide(Math.max(p.R, 0.01 * p.entry)),
           });

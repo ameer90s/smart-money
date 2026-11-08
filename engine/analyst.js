@@ -26,6 +26,12 @@ export function classifyLoss(x) {
   return 'other';
 }
 
+// Signals from Monday up to this day (the week-to-date sample used for the Friday review).
+function weekSig(day) {
+  const monday = mondayOf(day);
+  return listDays().filter((d) => d >= monday && d <= day).flatMap((d) => readJSON(dayRel(d, 'signals.json'), []));
+}
+
 function recent(nDays) {
   const days = listDays().slice(-nDays);
   const sig = [], recs = [];
@@ -51,6 +57,13 @@ export function filterCompare(sig) {
     wins: a.filter((s) => typeof s.sim.r === 'number' && s.sim.r > 0).length,
     avgR: +(a.reduce((p, s) => p + (typeof s.sim.r === 'number' ? s.sim.r : 0), 0) / a.length).toFixed(2),
   })).sort((x, y) => y.n - x.n);
+}
+
+// Monday of the week that contains this day (YYYY-MM-DD).
+function mondayOf(day) {
+  const d = new Date(`${day}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
+  return d.toISOString().slice(0, 10);
 }
 
 export function rulesReport(day) {
@@ -106,7 +119,7 @@ export function rulesReport(day) {
   const TOD_AR = { open: 'أول 30 دقيقة', morning: 'الصباح', midday: 'منتصف اليوم', late: 'آخر الجلسة' };
   for (const [k, xs] of Object.entries(byTod)) if (xs.length >= 10 && avgR(xs) < -0.2) props.push({ id: `tod-${k}`, aspect: 'التوقيت', text: `شدّد الشروط في ${TOD_AR[k]}`, why: `إشارات ${TOD_AR[k]} متوسطها ${avgR(xs).toFixed(2)}R على ${cn(xs.length, 'إشارات', 'إشارة')}، يعني خاسرة بالمتوسط`, effect: `توصيات أقل في ${TOD_AR[k]}، وتبقى بس الإشارات الأقوى` });
 
-  return { day, at: Date.now(), source: 'rules', bullets, causes: causeList, proposals: props, losers: losers.length, filters: filterCompare(sig) };
+  return { day, at: Date.now(), source: 'rules', bullets, causes: causeList, proposals: props, losers: losers.length, filters: filterCompare(sig), filtersWeek: filterCompare(weekSig(day)) };
 }
 
 async function claudeReport(day, base) {
@@ -141,6 +154,25 @@ async function claudeReport(day, base) {
   }
 }
 
+// Every audited signal, grouped by setup and market state. Only cells with enough signals can name a best setup.
+export function strategyTable() {
+  const sig = listDays().flatMap((d) => readJSON(dayRel(d, 'signals.json'), [])).filter((s) => s.sim && typeof s.sim.r === 'number' && s.regime);
+  const cells = {};
+  for (const s of sig) {
+    const k = `${s.setup}|${s.regime}`;
+    const c = (cells[k] = cells[k] || { setup: s.setup, regime: s.regime, n: 0, reached1R: 0, wins: 0, sumR: 0 });
+    c.n++; c.sumR += s.sim.r; if (s.sim.mfe >= 1) c.reached1R++; if (s.sim.r > 0) c.wins++;
+  }
+  const MIN_N = 20;
+  const rows = Object.values(cells).map((c) => ({ setup: c.setup, regime: c.regime, n: c.n, reached1R: Math.round((c.reached1R / c.n) * 100), win: Math.round((c.wins / c.n) * 100), avgR: +(c.sumR / c.n).toFixed(2) })).sort((a, b) => b.avgR - a.avgR);
+  const best = {};
+  for (const g of ['up', 'flat', 'down']) {
+    const cand = rows.filter((r) => r.regime === g && r.n >= MIN_N);
+    best[g] = cand.length && cand[0].avgR > 0 ? { setup: cand[0].setup, n: cand[0].n, avgR: cand[0].avgR } : null;
+  }
+  return { at: Date.now(), minN: MIN_N, rows, best };
+}
+
 export async function runAnalyst(day) {
   const base = rulesReport(day);
   const res = await claudeReport(day, base);
@@ -162,6 +194,7 @@ export async function runAnalyst(day) {
   writeJSON('proposals.json', proposals);
   const report = { ...base, kind: weekly ? 'weekly' : 'daily', bullets: ai ? [...ai.bullets] : base.bullets, source: ai ? 'claude' : 'rules', ...(res && res.error ? { claudeError: res.error } : {}) };
   writeJSON(dayRel(day, 'analyst.json'), report);
+  writeJSON('strategy.json', strategyTable());
   return { report, proposals };
 }
 

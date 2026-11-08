@@ -129,6 +129,7 @@ function buildLive() {
     history,
     stats: { today: rt.recs ? rt.recs.stats() : null, week: weekStats(day), targetUsd: +(cfg.capital * 0.01).toFixed(2), capital: cfg.capital },
     analyst: latestAnalystDay ? readJSON(dayRel(latestAnalystDay, 'analyst.json'), null) : null,
+    strategy: readJSON('strategy.json', null),
     proposals: readJSON('proposals.json', []).slice(-20),
     profiles: profilesSummary(cfg),
     model: model.summary(),
