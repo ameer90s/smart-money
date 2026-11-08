@@ -36,6 +36,23 @@ function recent(nDays) {
   return { days, sig, recs };
 }
 
+// Compare every filter on the same sample: how many signals it stopped, how many of those reached 1R,
+// and what they would have earned. Accepted signals are the baseline. Sim data comes from the audit.
+export function filterCompare(sig) {
+  const rows = sig.filter((s) => s.sim && typeof s.sim.mfe === 'number');
+  const by = {};
+  for (const s of rows) {
+    const keys = s.accepted === false ? (s.why && s.why.length ? s.why : ['other']) : ['accepted'];
+    for (const k of new Set(keys)) (by[k] = by[k] || []).push(s);
+  }
+  return Object.entries(by).map(([rule, a]) => ({
+    rule, n: a.length,
+    reached1R: a.filter((s) => s.sim.mfe >= 1).length,
+    wins: a.filter((s) => typeof s.sim.r === 'number' && s.sim.r > 0).length,
+    avgR: +(a.reduce((p, s) => p + (typeof s.sim.r === 'number' ? s.sim.r : 0), 0) / a.length).toFixed(2),
+  })).sort((x, y) => y.n - x.n);
+}
+
 export function rulesReport(day) {
   const { sig, recs } = recent(10);
   const today = { sig: sig.filter((s) => s.day === day), recs: recs.filter((r) => r.day === day) };
@@ -89,7 +106,7 @@ export function rulesReport(day) {
   const TOD_AR = { open: 'أول 30 دقيقة', morning: 'الصباح', midday: 'منتصف اليوم', late: 'آخر الجلسة' };
   for (const [k, xs] of Object.entries(byTod)) if (xs.length >= 10 && avgR(xs) < -0.2) props.push({ id: `tod-${k}`, aspect: 'التوقيت', text: `شدّد الشروط في ${TOD_AR[k]}`, why: `إشارات ${TOD_AR[k]} متوسطها ${avgR(xs).toFixed(2)}R على ${cn(xs.length, 'إشارات', 'إشارة')}، يعني خاسرة بالمتوسط`, effect: `توصيات أقل في ${TOD_AR[k]}، وتبقى بس الإشارات الأقوى` });
 
-  return { day, at: Date.now(), source: 'rules', bullets, causes: causeList, proposals: props, losers: losers.length };
+  return { day, at: Date.now(), source: 'rules', bullets, causes: causeList, proposals: props, losers: losers.length, filters: filterCompare(sig) };
 }
 
 async function claudeReport(day, base) {
