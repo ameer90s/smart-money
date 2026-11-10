@@ -195,7 +195,39 @@ async function labDay(sess, env) {
           // re-filter offline: plan stop and two wider stops, each with fixed 1R/1.5R/2R exits.
           used.add(`row|${s0.type}`);
           const wide = (Rw) => ({ R: +Rw.toFixed(4), r1: +simFixed(bars, fillAt, p.entry, p.entry - Rw, p.entry + Rw, cfg.timeStopMin, flatMs).toFixed(3), r15: +simFixed(bars, fillAt, p.entry, p.entry - Rw, p.entry + 1.5 * Rw, cfg.timeStopMin, flatMs).toFixed(3), r2: +simFixed(bars, fillAt, p.entry, p.entry - Rw, p.entry + 2 * Rw, cfg.timeStopMin, flatMs).toFixed(3) });
+          // Candidate separators (v2 features), all measured at signal time only (no look-ahead).
+          const rd = (v, n = 2) => (v == null || !Number.isFinite(v) ? null : +v.toFixed(n));
+          const idxAt = (arr, T) => { let k = -1; for (let q = 0; q < arr.length; q++) { if (ms(arr[q].t) + 60000 > T) break; k = q; } return k; };
+          const stockChg = (ctx.last.c / dc.pc - 1) * 100;
+          const sk = idxAt(spy, tc), sk30 = idxAt(spy, tc - 30 * 60000);
+          const recS = recordOf(s);
+          const secEtf = recS && recS.sector && recS.sector !== 'SPY' ? recS.sector : null;
+          let spyVw = null;
+          if (sk >= 0) { let pv = 0, vv = 0; for (let q = 0; q <= sk; q++) { const tp = (spy[q].h + spy[q].l + spy[q].c) / 3; pv += tp * spy[q].v; vv += spy[q].v; } spyVw = vv ? (spy[sk].c / (pv / vv) - 1) * 100 : null; }
+          const sumV = (a, b) => { let t = 0; for (let q = Math.max(0, a); q <= b; q++) t += bars[q].v; return t; };
+          const lb = bars[i], span = lb.h - lb.l;
+          const last3 = bars.slice(Math.max(0, i - 2), i + 1);
+          const back30 = bars.slice(Math.max(first, i - 30), i);
+          let att = 0;
+          for (const b of back30) if (b.h >= s0.trigger - 0.1 * ctx.a5 && b.c < s0.trigger) att++;
+          const hi30 = back30.length ? Math.max(...back30.map((b) => b.h)) : lb.h, lo30 = back30.length ? Math.min(...back30.map((b) => b.l)) : lb.l;
+          const f2 = {
+            rsSpy: rd(stockChg - chgAt(spy, spyPc, tc)),                      // stock % change minus SPY % change
+            rsSec: secEtf && mk[secEtf] ? rd(stockChg - chgAt(mk[secEtf], pcOf(secEtf), tc)) : null, // minus its sector ETF
+            spy30: sk >= 0 && sk30 >= 0 ? rd((spy[sk].c / spy[sk30].c - 1) * 100, 3) : null,        // SPY 30-minute trend %
+            spyVw: rd(spyVw, 3),                                              // SPY % above its VWAP
+            dPmh: ctx.pmHigh ? rd((ctx.pmHigh - ctx.last.c) / ctx.a5) : null, // distance to levels in 5m ATR (positive = level above)
+            dPdh: dc.pdh ? rd((dc.pdh - ctx.last.c) / ctx.a5) : null,
+            dHod: rd((ctx.hod - ctx.last.c) / ctx.a5),
+            dOrb: ctx.orb15 ? rd((ctx.orb15.h - ctx.last.c) / ctx.a5) : null,
+            vAcc: i >= first + 9 ? rd(sumV(i - 4, i) / Math.max(1, sumV(i - 9, i - 5))) : null, // last 5 bars volume / previous 5
+            cLoc: span > 0 ? rd((lb.c - lb.l) / span) : null,                // close location in the last bar's range
+            cLoc3: last3.length ? rd(last3.reduce((a, b) => a + (b.h > b.l ? (b.c - b.l) / (b.h - b.l) : 0.5), 0) / last3.length) : null,
+            att,                                                              // failed pushes at the trigger in the last 30 minutes
+            rng30: rd((hi30 - lo30) / ctx.a5),                                // 30-minute range in ATR (compression / expansion)
+          };
           env.rows.push({
+            ...f2,
             d: day, s, ty: s0.type, fams: c.fams, w: inWatch ? 1 : 0, e: p.entry, R: +p.R.toFixed(4), sp: p.spread, a5: +ctx.a5.toFixed(4),
             ext: +s0.ext.toFixed(2), chg: +((ctx.last.c / dc.pc - 1) * 100).toFixed(2), rv: rvol == null ? null : +rvol.toFixed(2), sc, ma: Math.round(ctx.minAfterOpen), rg: regime,
             dv: +((ctx.vwap - ctx.last.c) / ctx.a5).toFixed(2), fails,
