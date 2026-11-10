@@ -11,7 +11,7 @@ import { ms, volumeShare } from './indicators.js';
 import { recordOf, loadCache } from './shariah.js';
 import { tradable } from './universe.js';
 import { estSpread, SECTOR_ETFS } from './market.js';
-import { dailyContext, scoreSeries, simulateWatch, regimeAt } from './backtest.js';
+import { dailyContext, scoreSeries, simulateWatch, regimeAt, stateAt } from './backtest.js';
 import { scoreBucket, todBucket } from './model.js';
 import { writeJSON } from './store.js';
 import { log, warn } from './log.js';
@@ -182,6 +182,7 @@ async function labDay(sess, env) {
         const firstOfType = !used.has(`row|${s0.type}`);
         if (!todo.length && !firstOfType) continue;
         const regime = regimeAt(spy, spyPc, fillAt, openMs);
+        const mstate = stateAt(spy, spyPc, fillAt, openMs);
         const p = makePlan(s0, ctx, { spread: spread(s0.trigger) }, cfg, { score: sc, regime });
         const fails = p.fails.filter((f) => STRUCTURAL.has(f));
         const out = {};
@@ -197,7 +198,7 @@ async function labDay(sess, env) {
           const wide = (Rw) => ({ R: +Rw.toFixed(4), r1: +simFixed(bars, fillAt, p.entry, p.entry - Rw, p.entry + Rw, cfg.timeStopMin, flatMs).toFixed(3), r15: +simFixed(bars, fillAt, p.entry, p.entry - Rw, p.entry + 1.5 * Rw, cfg.timeStopMin, flatMs).toFixed(3), r2: +simFixed(bars, fillAt, p.entry, p.entry - Rw, p.entry + 2 * Rw, cfg.timeStopMin, flatMs).toFixed(3) });
           env.rows.push({
             d: day, s, ty: s0.type, fams: c.fams, w: inWatch ? 1 : 0, e: p.entry, R: +p.R.toFixed(4), sp: p.spread, a5: +ctx.a5.toFixed(4),
-            ext: +s0.ext.toFixed(2), chg: +((ctx.last.c / dc.pc - 1) * 100).toFixed(2), rv: rvol == null ? null : +rvol.toFixed(2), sc, ma: Math.round(ctx.minAfterOpen), rg: regime,
+            ext: +s0.ext.toFixed(2), chg: +((ctx.last.c / dc.pc - 1) * 100).toFixed(2), rv: rvol == null ? null : +rvol.toFixed(2), sc, ma: Math.round(ctx.minAfterOpen), rg: regime, st: mstate,
             dv: +((ctx.vwap - ctx.last.c) / ctx.a5).toFixed(2), fails,
             et: +(ny(fillAt).min / 60).toFixed(2), xr: mgReason, // entry time (NY hour) and how the managed exit ended
             x: Object.fromEntries(Object.entries(out).map(([k, v]) => [k, +v.toFixed(3)])),
@@ -206,7 +207,7 @@ async function labDay(sess, env) {
         }
         if (!todo.length || fails.length) continue;
         const costR = ((2 * cfg.feePerSide) / (cfg.capital / p.entry) + p.spread) / p.R;
-        const meta = { day, regime, tod: todBucket(ctx.minAfterOpen), score: scoreBucket(sc), type: s0.type };
+        const meta = { day, regime, state: mstate || 'none', tod: todBucket(ctx.minAfterOpen), score: scoreBucket(sc), type: s0.type };
         for (const [fam, fu] of todo) for (const ex of Object.keys(EXITS)) record(`${fam}|${ex}|${fu}`, meta, out[ex], out[ex] - costR);
         trades++;
       }
@@ -228,11 +229,11 @@ export async function runLab(universe, cfg, { days = 90, testDays = 30, budgetMs
   const daily = await alpaca.bars([...syms, 'SPY', ...SECTOR_ETFS], { timeframe: '1Day', start: isoNy(addDays(sessions[0].date, -45), '00:00'), end: isoNy(sessions[sessions.length - 1].date, '20:00'), feed: 'sip' });
 
   const stats = {};
-  const get = (key) => (stats[key] = stats[key] || { train: blank(), test: blank(), all: blank(), regime: {}, tod: {}, score: {}, type: {}, month: {} });
+  const get = (key) => (stats[key] = stats[key] || { train: blank(), test: blank(), all: blank(), regime: {}, state: {}, tod: {}, score: {}, type: {}, month: {} });
   const record = (key, m, gross, net) => {
     const s = get(key);
     add(s[testSet.has(m.day) ? 'test' : 'train'], gross, net); add(s.all, gross, net);
-    for (const [dim, v] of [['regime', m.regime], ['tod', m.tod], ['score', m.score], ['type', m.type], ['month', m.day.slice(0, 7)]]) add((s[dim][v] = s[dim][v] || blank()), gross, net);
+    for (const [dim, v] of [['regime', m.regime], ['state', m.state], ['tod', m.tod], ['score', m.score], ['type', m.type], ['month', m.day.slice(0, 7)]]) add((s[dim][v] = s[dim][v] || blank()), gross, net);
   };
   const perDay = [];
   const rows = [];
@@ -247,7 +248,7 @@ export async function runLab(universe, cfg, { days = 90, testDays = 30, budgetMs
   const variants = Object.entries(stats).map(([key, s]) => {
     const [fam, exit, funnel] = key.split('|');
     const dimFin = (o) => Object.fromEntries(Object.entries(o).map(([k, v]) => [k, fin(v)]));
-    return { key, fam, exit, funnel, label: FAMILIES[fam], exitLabel: EXIT_AR[exit], funnelLabel: FUNNEL_AR[funnel], train: fin(s.train), test: fin(s.test), all: fin(s.all), regime: dimFin(s.regime), tod: dimFin(s.tod), score: dimFin(s.score), type: dimFin(s.type), month: dimFin(s.month) };
+    return { key, fam, exit, funnel, label: FAMILIES[fam], exitLabel: EXIT_AR[exit], funnelLabel: FUNNEL_AR[funnel], train: fin(s.train), test: fin(s.test), all: fin(s.all), regime: dimFin(s.regime), state: dimFin(s.state), tod: dimFin(s.tod), score: dimFin(s.score), type: dimFin(s.type), month: dimFin(s.month) };
   }).sort((a, b) => (b.test.avgNet ?? -9) - (a.test.avgNet ?? -9));
   const out = {
     at: Date.now(), version: 1, sessions: sessions.length, done: perDay.length, from: sessions[0] && sessions[0].date, to: sessions[sessions.length - 1] && sessions[sessions.length - 1].date,

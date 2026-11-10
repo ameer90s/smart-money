@@ -16,6 +16,7 @@ import { Watchlist } from './watchlist.js';
 import { plan as makePlan } from './planner.js';
 import { Recs, weekStats } from './recs.js';
 import { marketContext, REGIME_AR, SECTOR_NAMES } from './market.js';
+import { STATE_AR } from './regime.js';
 import { buildWeek, loadWeek, dayRules, recordOutcomes } from './events.js';
 import { auditDay } from './audit.js';
 import { bootstrap } from './backtest.js';
@@ -118,7 +119,7 @@ function buildLive() {
     v: 1, at: now(), app: APP_VERSION, version: VERSION,
     server: { runner: ENV.runner, startedAt: STARTED, phase: rt.phase, cycle: rt.cycle, lastCycleAt: rt.lastCycleAt, cycleMs: rt.cycleMs, callsPerMin: callsPerMinute(new URL(ENV.alpacaData).host), ws: rt.stream ? rt.stream.status() : null, errors: recentErrors() },
     session: rt.sess ? { day, open: rt.sess.open, close: rt.sess.close } : { day, open: null, close: null },
-    market: rt.mkt ? { ...rt.mkt, regimeAr: REGIME_AR[rt.mkt.regime] } : null,
+    market: rt.mkt ? { ...rt.mkt, regimeAr: REGIME_AR[rt.mkt.regime], stateAr: rt.mkt.state ? STATE_AR[rt.mkt.state] : null } : null,
     universe: { liquid: u ? u.liquid : 0, counts, tradable: counts.ok + (cfg.allowDoubtful ? counts.doubt : 0), builtDay: u ? u.day : null },
     funnel: { universe: counts.ok, scanned: rt.scanned, active: rt.active, candidates: rt.cands, watch: wl ? wl.items.size : 0, inplay: wl ? wl.inplay.size : 0, recs: todayRecs.length },
     pre: rt.pre.slice(0, 12),
@@ -253,7 +254,7 @@ async function runDay(day, sess) {
       }
       const accepted = why.length === 0;
       const profile = matchProfile(cfg, { setup: setup.type, plan: p, minAfterOpen: it.ctx.minAfterOpen, feats: it.feats, regime });
-      const sig = { id: `${day}-${it.sym}-${setup.type}-${t}`, day, sym: it.sym, setup: setup.type, label: setup.label, firedAt: t, firedNy: ny(t).hm, plan: p, accepted, why, score: it.score, minAfterOpen: it.ctx.minAfterOpen, regime, feats: it.feats, version: VERSION, ...(profile ? { profile } : {}) };
+      const sig = { id: `${day}-${it.sym}-${setup.type}-${t}`, day, sym: it.sym, setup: setup.type, label: setup.label, firedAt: t, firedNy: ny(t).hm, plan: p, accepted, why, score: it.score, minAfterOpen: it.ctx.minAfterOpen, regime, state: (rt.mkt && rt.mkt.state) || null, feats: it.feats, version: VERSION, ...(profile ? { profile } : {}) };
       signals.upsert(sig); signals.flush();
       log(`signal ${it.sym} ${setup.type} ${accepted ? 'ACCEPTED' : `rejected (${why.join(',')})`}${profile ? ` · profile ${profile}` : ''}`);
       if (accepted) {

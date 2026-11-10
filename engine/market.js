@@ -1,7 +1,8 @@
 // Market and sector context from SPY/QQQ and the SPDR sector funds (used only as
 // context, never traded).
 import { alpaca } from './alpaca.js';
-import { ny } from './clock.js';
+import { ny, isoNy, nyToUtc } from './clock.js';
+import { marketState } from './regime.js';
 import { warn } from './log.js';
 
 export const SECTOR_ETFS = ['XLK', 'XLC', 'XLV', 'XLF', 'XLE', 'XLU', 'XLRE', 'XLB', 'XLP', 'XLY', 'XLI'];
@@ -43,7 +44,16 @@ export async function marketContext() {
     else if (spy.above === false && spy.chg < -0.3) regime = 'down';
     const sectors = {};
     for (const e of SECTOR_ETFS) sectors[e] = +(one(e).chg - spy.chg).toFixed(2);
-    return { at: Date.now(), spy, qqq, regime, sectors };
+    // Market state (trend / sideways / choppy) from today's SPY bars; never blocks the context.
+    let state = null, stateInfo = null;
+    try {
+      const openMs = nyToUtc(today, '09:30');
+      const pc = prevClose(snaps.SPY, today);
+      const bars = await alpaca.bars(['SPY'], { timeframe: '1Min', start: isoNy(today, '09:30'), end: new Date().toISOString(), feed: 'iex' });
+      stateInfo = marketState(bars.SPY || [], pc, Date.now(), openMs);
+      state = stateInfo ? stateInfo.state : null;
+    } catch (e) { warn('marketState', e); }
+    return { at: Date.now(), spy, qqq, regime, state, stateInfo, sectors };
   } catch (e) {
     warn('marketContext', e);
     return null;

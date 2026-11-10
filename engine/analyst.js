@@ -170,7 +170,22 @@ export function strategyTable() {
     const cand = rows.filter((r) => r.regime === g && r.n >= MIN_N);
     best[g] = cand.length && cand[0].avgR > 0 ? { setup: cand[0].setup, n: cand[0].n, avgR: cand[0].avgR } : null;
   }
-  return { at: Date.now(), minN: MIN_N, rows, best };
+  // The same table by the finer market state (trend up/down, sideways, choppy). Signals logged before the
+  // state existed have none; they are only in the table above.
+  const stCells = {};
+  for (const s of sig) {
+    if (!s.state) continue;
+    const k = `${s.setup}|${s.state}`;
+    const c = (stCells[k] = stCells[k] || { setup: s.setup, state: s.state, n: 0, reached1R: 0, wins: 0, sumR: 0 });
+    c.n++; c.sumR += s.sim.r; if (s.sim.mfe >= 1) c.reached1R++; if (s.sim.r > 0) c.wins++;
+  }
+  const stRows = Object.values(stCells).map((c) => ({ setup: c.setup, state: c.state, n: c.n, reached1R: Math.round((c.reached1R / c.n) * 100), win: Math.round((c.wins / c.n) * 100), avgR: +(c.sumR / c.n).toFixed(2) })).sort((a, b) => b.avgR - a.avgR);
+  const bestState = {};
+  for (const g of ['trendUp', 'trendDown', 'range', 'choppy']) {
+    const cand = stRows.filter((r) => r.state === g && r.n >= MIN_N);
+    bestState[g] = cand.length && cand[0].avgR > 0 ? { setup: cand[0].setup, n: cand[0].n, avgR: cand[0].avgR } : null;
+  }
+  return { at: Date.now(), minN: MIN_N, rows, best, stateRows: stRows, bestState };
 }
 
 export async function runAnalyst(day) {

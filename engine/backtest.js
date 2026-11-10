@@ -17,6 +17,7 @@ import { recordOf, loadCache } from './shariah.js';
 import { tradable } from './universe.js';
 import { estSpread, SECTOR_ETFS } from './market.js';
 import { score as scoreOf } from './scanner.js';
+import { marketState } from './regime.js';
 import * as model from './model.js';
 import { log, warn } from './log.js';
 
@@ -113,6 +114,9 @@ export function regimeAt(spy, spyPc, t, openMs) {
   return 'flat';
 }
 
+// Market state (trend / sideways / choppy) at the same moment, from the same SPY bars.
+export const stateAt = (spy, spyPc, t, openMs) => { const x = marketState(spy, spyPc, t, openMs); return x ? x.state : null; };
+
 // Setups for one watched stock, only inside its watch windows; each setup type once per day.
 export function replayWatched({ sym, day, bars, spy, spyPc, cfg, dc, adv, windows, scoreAt, sess }) {
   const openMs = nyToUtc(day, sess.open);
@@ -149,7 +153,7 @@ export function replayWatched({ sym, day, bars, spy, spyPc, cfg, dc, adv, window
         const p = makePlan(s, ctx, { spread: estSpread(s.trigger, adv) }, cfg, { score: sc, regime });
         if (p.fails.some((f) => STRUCTURAL.has(f))) break;
         const sim = simulate(bars, at, p, { flatMs, timeStopMin: cfg.timeStopMin });
-        out.push({ setup: s.type, mfe: sim.mfe, score: model.scoreBucket(sc), tod: model.todBucket(ctx.minAfterOpen), regime, src: 'replay', day, sym, r: sim.r });
+        out.push({ setup: s.type, mfe: sim.mfe, score: model.scoreBucket(sc), tod: model.todBucket(ctx.minAfterOpen), regime, state: stateAt(spy, spyPc, at, openMs), src: 'replay', day, sym, r: sim.r });
         break;
       }
     }

@@ -12,6 +12,8 @@ import { DEFAULTS } from '../engine/config.js';
 import { estSpread, effectiveSpread } from '../engine/market.js';
 import { matchProfile, profileSim } from '../engine/profiles.js';
 import { Watchlist } from '../engine/watchlist.js';
+import { marketState, stateTimeline } from '../engine/regime.js';
+import { pathOf } from '../engine/audit.js';
 
 let n = 0;
 const t = (name, fn) => { fn(); n++; console.log(`PASS  ${name}`); };
@@ -160,6 +162,54 @@ t('spread: liquidity estimate caps a wide IEX quote, a tight quote wins', () => 
   assert.equal(effectiveSpread(84, 0.01, 300e6), 0.01);
   assert.equal(effectiveSpread(25.76, null, 20e6), 0.03);
   assert.equal(estSpread(5, 1e9), 0.01);            // never below one cent
+});
+
+// ---- market state (trend / sideways / choppy) from synthetic SPY minutes ----
+const spyDay = '2026-11-03';
+const spyOpen = nyToUtc(spyDay, '09:30');
+const mkSpy = (f, n = 120, base = 500) => Array.from({ length: n }, (_, i) => {
+  const c = f(i, base), o = i ? f(i - 1, base) : base;
+  return { t: new Date(spyOpen + i * 60000).toISOString(), o, h: Math.max(o, c) + 0.05, l: Math.min(o, c) - 0.05, c, v: 1000, vw: c };
+});
+const at = (n) => spyOpen + n * 60000 + 60000;
+t('market state: straight climb is a trend up, straight drop a trend down', () => {
+  assert.equal(marketState(mkSpy((i, b) => b + i * 0.05), 500, at(120), spyOpen).state, 'trendUp');
+  assert.equal(marketState(mkSpy((i, b) => b - i * 0.05), 500, at(120), spyOpen).state, 'trendDown');
+});
+t('market state: tiny wiggle around one level is sideways', () => {
+  const m = marketState(mkSpy((i, b) => b + Math.sin(i / 3) * 0.05), 500, at(120), spyOpen);
+  assert.equal(m.state, 'range');
+  assert.ok(m.amp < 0.25);
+});
+t('market state: big swings back and forth across VWAP are choppy', () => {
+  // vwap is the running mean of the closes, so a wide square wave crosses it again and again
+  const bars = mkSpy((i, b) => b + (Math.floor(i / 8) % 2 ? 1.6 : -1.6), 120);
+  let cum = 0; bars.forEach((x, i) => { cum += x.c; x.vw = cum / (i + 1); });
+  const m = marketState(bars, 500, at(120), spyOpen);
+  assert.equal(m.state, 'choppy', JSON.stringify(m));
+  assert.ok(m.crosses >= 3 && m.amp >= 0.25);
+});
+t('market state: no state before 30 minutes, and no look-ahead', () => {
+  const bars = mkSpy((i, b) => b + i * 0.05);
+  assert.equal(marketState(bars, 500, at(20), spyOpen), null);
+  const early = marketState(bars, 500, at(60), spyOpen);
+  const sameWithFuture = marketState(bars.concat(mkSpy((i, b) => b - 50, 10).map((x, i) => ({ ...x, t: new Date(spyOpen + (120 + i) * 60000).toISOString() }))), 500, at(60), spyOpen);
+  assert.deepEqual(early, sameWithFuture);
+  assert.equal(marketState([], 500, at(60), spyOpen), null);
+  assert.ok(stateTimeline(bars, 500, spyOpen, spyOpen + 120 * 60000).length >= 15);
+});
+
+// ---- watchlist outcome path ----
+t('path: high and low times, first +/-2% touch and 5-minute closes', () => {
+  const t0 = nyToUtc(spyDay, '10:00');
+  const px = [100, 100.5, 101, 102.2, 101.5, 100.2, 98.5, 97.8, 98.5, 99, 99.5, 100];
+  const b = px.map((c, i) => ({ t: new Date(t0 + i * 60000).toISOString(), o: i ? px[i - 1] : 100, h: c + 0.1, l: c - 0.1, c }));
+  const r = pathOf(b, 100, t0);
+  assert.equal(r.tHigh, 3);
+  assert.equal(r.tLow, 7);
+  assert.deepEqual(r.first2, { side: 'up', min: 3 });
+  assert.deepEqual(r.first1, { side: 'up', min: 2 });
+  assert.deepEqual(r.path, [+(((b[4].c / 100) - 1) * 100).toFixed(2), +(((b[9].c / 100) - 1) * 100).toFixed(2)]);
 });
 
 console.log(`\n${n} unit checks passed`);
