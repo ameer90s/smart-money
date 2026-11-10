@@ -1,1 +1,1 @@
-[{"sym":"SENS","type":"DIP","trigger":11.68,"stop":11.4666,"inplay":false,"t":1794327660147,"until":1794327840147,"outcome":null}]
+[{"sym":"SENS","type":"DIP","trigger":11.68,"stop":11.4666,"inplay":false,"t":1794327660147,"until":1794327840147,"outcome":"expired","endAt":1794327844382,"price":null},{"sym":"SENS","type":"DIP","trigger":11.695,"stop":11.5013,"inplay":false,"t":1794327900150,"until":1794328080150,"outcome":"expired","endAt":1794328084329,"price":null}]
