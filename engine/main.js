@@ -232,7 +232,8 @@ async function runDay(day, sess) {
       const equity = +(cfg.capital + weekStats(ny(t).ymd).net).toFixed(2);
       const eff = { ...cfg, capital: equity, probMinT1: cfg.probMinT1 + (R.probBoost || 0), recTo: minToHm(recToMin) };
       const p = makePlan(setup, it.ctx, { spread: it.spread }, eff, { score: it.score, regime });
-      const why = [...p.fails, ...recs.guard(it.sym, eff)];
+      const SOFT = cfg.learnPhase ? new Set(['ev', 'prob']) : new Set(); // logged, never blocking, in the learning phase
+      const why = [...p.fails, ...recs.guard(it.sym, eff, setup.type)];
       if ((R.earningsToday || []).includes(it.sym)) why.push('earnings');
       // The dip setup did best on down days in the lab, so the down-market rule applies to the others only.
       if (p.exit !== 'full' && regime === 'down' && p.targets[0].prob < eff.probMinT1 + 0.1) why.push('market');
@@ -244,7 +245,8 @@ async function runDay(day, sess) {
       }
       // A pause the user approved on an analyst proposal stops recommendations for that setup (it is still logged).
       const paused = readJSON('proposals.json', []).filter((x) => x.status === 'approved' && String(x.id).startsWith('pause-')).map((x) => String(x.id).slice(6));
-      if (paused.includes(setup.type)) why.push('paused');
+      const pausedByUser = paused.includes(setup.type);
+      if (pausedByUser && !cfg.learnPhase) why.push('paused');
       if (R.halfSizeUntil && ny(t).min < hmToMin(R.halfSizeUntil)) {
         p.sizing.shares = Math.floor((p.sizing.shares / 2) * 100) / 100;
         p.sizing.cost = +(p.sizing.shares * p.entry).toFixed(2);
@@ -252,11 +254,12 @@ async function runDay(day, sess) {
         p.sizing.riskUsd = +(p.sizing.shares * p.R + p.sizing.fees).toFixed(2);
         for (const tg of p.targets) tg.netUsd = +(p.sizing.shares * (tg.price - p.entry) - p.sizing.fees).toFixed(2);
       }
-      const accepted = why.length === 0;
+      const accepted = why.every((w) => SOFT.has(w));
+      const weak = why.filter((w) => SOFT.has(w));
       const profile = matchProfile(cfg, { setup: setup.type, plan: p, minAfterOpen: it.ctx.minAfterOpen, feats: it.feats, regime });
-      const sig = { id: `${day}-${it.sym}-${setup.type}-${t}`, day, sym: it.sym, setup: setup.type, label: setup.label, firedAt: t, firedNy: ny(t).hm, plan: p, accepted, why, score: it.score, minAfterOpen: it.ctx.minAfterOpen, regime, state: (rt.mkt && rt.mkt.state) || null, feats: it.feats, version: VERSION, ...(profile ? { profile } : {}) };
+      const sig = { id: `${day}-${it.sym}-${setup.type}-${t}`, day, sym: it.sym, setup: setup.type, label: setup.label, firedAt: t, firedNy: ny(t).hm, plan: p, accepted, why, score: it.score, minAfterOpen: it.ctx.minAfterOpen, regime, state: (rt.mkt && rt.mkt.state) || null, feats: it.feats, version: VERSION, ...(weak.length ? { weak } : {}), ...(pausedByUser ? { pausedByUser: true } : {}), ...(profile ? { profile } : {}) };
       signals.upsert(sig); signals.flush();
-      log(`signal ${it.sym} ${setup.type} ${accepted ? 'ACCEPTED' : `rejected (${why.join(',')})`}${profile ? ` · profile ${profile}` : ''}`);
+      log(`signal ${it.sym} ${setup.type} ${accepted ? `ACCEPTED${weak.length ? ` (weak: ${weak.join(',')})` : ''}` : `rejected (${why.join(',')})`}${profile ? ` · profile ${profile}` : ''}`);
       if (accepted) {
         recs.issue({ it, setup, plan: p, feats: it.feats, market: rt.mkt, sh: recordOf(it.sym), events: R.events });
         publishLive(true);

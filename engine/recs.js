@@ -17,15 +17,19 @@ export class Recs {
   all() { return this.col.all(); }
   active() { return this.all().filter((r) => r.status === 'active'); }
 
+  // Recommendations that count (weekly target, balance, daily limits). Others are tracked only (counted: false).
+  counted() { return this.all().filter((r) => r.counted !== false); }
+
   stats() {
-    const closed = this.all().filter((r) => r.status === 'closed');
+    const mine = this.counted();
+    const closed = mine.filter((r) => r.status === 'closed');
     const net = closed.reduce((a, r) => a + (r.result ? r.result.net : 0), 0);
     let streak = 0;
     for (const r of [...closed].reverse()) { if (r.result && r.result.net < 0) streak++; else break; }
-    return { issued: this.all().length, closed: closed.length, active: this.active().length, net: +net.toFixed(2), wins: closed.filter((r) => r.result.net > 0).length, losses: closed.filter((r) => r.result.net <= 0).length, lossStreak: streak };
+    return { issued: mine.length, monitored: this.all().length - mine.length, closed: closed.length, active: this.active().length, net: +net.toFixed(2), wins: closed.filter((r) => r.result.net > 0).length, losses: closed.filter((r) => r.result.net <= 0).length, lossStreak: streak };
   }
 
-  guard(sym, cfgOverride = {}) {
+  guard(sym, cfgOverride = {}, setupType = null) {
     const cfg = { ...this.cfg, ...cfgOverride };
     const m = ny().min;
     const why = [];
@@ -34,16 +38,18 @@ export class Recs {
     if (st.issued >= cfg.maxRecsDay) why.push('max');
     if (st.net <= -cfg.dailyLossStop) why.push('dailyLoss');
     if (now() < this.cooldownUntil) why.push('cooldown');
-    // One open trade at a time: a new recommendation waits until the open one is closed.
-    if (this.active().length) why.push('busy');
-    if (this.all().some((r) => r.sym === sym)) why.push('dup');
+    // One open counted trade at a time. In the learning phase a new recommendation is still issued (tracked only).
+    if (!cfg.learnPhase && this.active().length) why.push('busy');
+    if (this.all().some((r) => r.sym === sym && (!cfg.learnPhase || !setupType || r.setup === setupType))) why.push('dup');
     return why;
   }
 
   issue({ it, setup, plan, feats, market, sh, events }) {
     const t = now();
+    // The first recommendation while no counted one is open has priority and counts; later ones are tracked only.
+    const counted = !this.active().some((r) => r.counted !== false);
     const rec = {
-      id: `${this.day}-${it.sym}-${setup.type}`, day: this.day, sym: it.sym, name: it.name, version: VERSION,
+      id: `${this.day}-${it.sym}-${setup.type}`, counted, day: this.day, sym: it.sym, name: it.name, version: VERSION,
       firedAt: t, firedNy: ny(t).hm, validUntil: t + 15 * 60000,
       setup: setup.type, label: setup.label, sector: it.sector,
       plan, status: 'active', stopNow: plan.stop, t1: false, t2: false, t3: false,
@@ -53,7 +59,7 @@ export class Recs {
       snapshot: { feats, ctx: ctxSnap(it.ctx), market, setup, scoreAtAdd: it.scoreAtAdd, watchAddedAt: it.addedAt, events: events || [] },
       timeline: [
         { t: it.addedAt, what: 'دخل قائمة المراقبة', note: `الدرجة ${it.scoreAtAdd}` },
-        { t, what: 'صدرت التوصية', note: setup.label },
+        { t, what: counted ? 'صدرت التوصية' : 'صدرت للمراقبة فقط (توصية أخرى مفتوحة)', note: setup.label },
       ],
       user: null,
     };
@@ -62,7 +68,7 @@ export class Recs {
     it.hasRec = true;
     this.onEvent('rec', { id: rec.id, sym: rec.sym, setup: rec.setup, entry: plan.entry, stop: plan.stop, t });
     const T = plan.targets;
-    if (this.cfg.notifyRec) {
+    if (this.cfg.notifyRec && counted) {
       notify({
         title: `توصية شراء ${rec.sym} · ${plan.label}`,
         message: plan.exit === 'full'
@@ -85,12 +91,12 @@ export class Recs {
     r.closedAt = t; r.exit = +p.toFixed(4); r.exitReason = reason;
     r.result = { net: +net.toFixed(2), r: +rMult.toFixed(2), best: r.t3 ? 3 : r.t2 ? 2 : r.t1 ? 1 : 0 };
     r.timeline.push({ t, what: reason, note: `الصافي ${net >= 0 ? '+' : ''}${net.toFixed(2)}$` });
-    if (net < 0) {
+    if (net < 0 && r.counted !== false) {
       const st = this.stats();
       if (st.lossStreak >= this.cfg.cooldownLosses) this.cooldownUntil = t + 30 * 60000;
     }
     this.onEvent('rec_close', { id: r.id, sym: r.sym, reason, net: r.result.net, t });
-    if (this.cfg.notifyMgmt) notify({ title: `${r.sym}: ${reason}`, message: `خروج ${fmt(p)} · الصافي ${net >= 0 ? '+' : ''}${net.toFixed(2)}$ (${rMult >= 0 ? '+' : ''}${rMult.toFixed(2)}R)`, priority: 4, tags: [net >= 0 ? 'white_check_mark' : 'x'] });
+    if (this.cfg.notifyMgmt && r.counted !== false) notify({ title: `${r.sym}: ${reason}`, message: `خروج ${fmt(p)} · الصافي ${net >= 0 ? '+' : ''}${net.toFixed(2)}$ (${rMult >= 0 ? '+' : ''}${rMult.toFixed(2)}R)`, priority: 4, tags: [net >= 0 ? 'white_check_mark' : 'x'] });
   }
 
   onPrice(sym, p, t) {
@@ -106,12 +112,12 @@ export class Recs {
       if (!r.t1 && p >= T[0].price) {
         r.t1 = true; r.stopNow = P.entry;
         r.timeline.push({ t, what: 'وصل الهدف 1', note: `بيع النصف · الوقف رُفع إلى ${fmt(P.entry)} (التعادل)` });
-        if (this.cfg.notifyMgmt) notify({ title: `${sym}: وصل الهدف 1 ✓`, message: `${fmt(T[0].price)} · بِع النصف وارفع الوقف إلى ${fmt(P.entry)}`, priority: 4, tags: ['dart'] });
+        if (this.cfg.notifyMgmt && r.counted !== false) notify({ title: `${sym}: وصل الهدف 1 ✓`, message: `${fmt(T[0].price)} · بِع النصف وارفع الوقف إلى ${fmt(P.entry)}`, priority: 4, tags: ['dart'] });
       }
       if (r.t1 && !r.t2 && p >= T[1].price) {
         r.t2 = true; r.stopNow = Math.max(r.stopNow, T[0].price);
         r.timeline.push({ t, what: 'وصل الهدف 2', note: `الوقف رُفع إلى ${fmt(T[0].price)}` });
-        if (this.cfg.notifyMgmt) notify({ title: `${sym}: وصل الهدف 2 ✓`, message: `${fmt(T[1].price)} · الوقف إلى ${fmt(T[0].price)}`, priority: 4, tags: ['dart'] });
+        if (this.cfg.notifyMgmt && r.counted !== false) notify({ title: `${sym}: وصل الهدف 2 ✓`, message: `${fmt(T[1].price)} · الوقف إلى ${fmt(T[0].price)}`, priority: 4, tags: ['dart'] });
       }
       if (r.t2 && p >= T[2].price) { r.t3 = true; this.closeRec(r, T[2].price, 'وصل الهدف 3', t); continue; }
       const mins = (t - r.firedAt) / 60000;
@@ -160,7 +166,7 @@ export function weekStats(today) {
   let net = 0, trades = 0, wins = 0, losses = 0, peak = 0, equity = 0, dd = 0;
   for (const d of days) {
     for (const r of readJSON(dayRel(d, 'recs.json'), [])) {
-      if (r.status !== 'closed' || !r.result) continue;
+      if (r.status !== 'closed' || !r.result || r.counted === false) continue;
       trades++; net += r.result.net; equity += r.result.net;
       if (r.result.net > 0) wins++; else losses++;
       peak = Math.max(peak, equity); dd = Math.max(dd, peak - equity);

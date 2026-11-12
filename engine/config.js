@@ -35,7 +35,14 @@ export const DEFAULTS = {
   confirmSec: 20,         // price must hold above the trigger this long
   timeStopMin: 60,
   // S1.3 — from the walk-forward lab (31 Oct): only the dip setup showed an edge before costs.
-  recSetups: ['DIP'],          // setups that always may become recommendations
+  // Learning phase (12 Nov): every setup may become a recommendation. The statistical gates (probability, expected
+  // value) are still computed and logged but no longer block, because they did not separate winners from losers and
+  // kept almost every signal out. The structural gates stay (stop, spread, extension, cost, window, market, earnings,
+  // daily limits). A pause approved on an analyst proposal is recorded but not enforced. While a counted
+  // recommendation is open, new ones are issued too, but only tracked (counted: false): they never enter the
+  // weekly target, the balance or the daily limits, and send no phone alert.
+  learnPhase: true,
+  recSetups: ['ORB5', 'ORB15', 'VWAP', 'FLAG', 'EMA', 'DIP', 'PMH', 'PDH'], // setups that may become recommendations
   recMinN: 30,                 // other setups qualify once the model has this many trades for them...
   recMinEv: 0.10,              // ...and their expected value (R, shrunk, adjusted for the market state) reaches this
   fixedR: { DIP: 1.5 },        // single target at k·R, sell everything there (as tested in the lab)

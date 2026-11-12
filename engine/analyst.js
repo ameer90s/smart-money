@@ -48,7 +48,7 @@ export function filterCompare(sig) {
   const rows = sig.filter((s) => s.sim && typeof s.sim.mfe === 'number');
   const by = {};
   for (const s of rows) {
-    const keys = s.accepted === false ? (s.why && s.why.length ? s.why : ['other']) : ['accepted'];
+    const keys = s.accepted === false ? (s.why && s.why.length ? s.why : ['other']) : ['accepted', ...(s.weak || [])];
     for (const k of new Set(keys)) (by[k] = by[k] || []).push(s);
   }
   return Object.entries(by).map(([rule, a]) => ({
@@ -81,10 +81,12 @@ export function rulesReport(day) {
   for (const s of missed) for (const f of s.why || []) (missedBy[f] = missedBy[f] || []).push(s);
 
   const bullets = [];
-  const closed = today.recs.filter((r) => r.status === 'closed');
+  const closed = today.recs.filter((r) => r.status === 'closed' && r.counted !== false);
+  const tracked = today.recs.filter((r) => r.status === 'closed' && r.counted === false && r.result);
   const net = closed.reduce((a, r) => a + r.result.net, 0);
   const cnt = (k) => (k === 1 ? 'توصية واحدة' : k === 2 ? 'توصيتان' : `${k} توصيات`);
   bullets.push(closed.length ? `${cnt(closed.length)} اليوم: ${closed.filter((r) => r.result.net > 0).length} رابحة و${closed.filter((r) => r.result.net <= 0).length} خاسرة. الصافي ${net >= 0 ? '+' : ''}${net.toFixed(2)}$.` : 'ما صدرت توصيات اليوم.');
+  if (tracked.length) bullets.push(`توصيات للمراقبة فقط (ما دخلت الهدف): ${tracked.map((r) => `${r.sym} ${r.setup} ${r.result.r >= 0 ? '+' : ''}${r.result.r.toFixed(2)}R`).join(' · ')}.`);
   for (const r of closed.filter((x) => x.result.net < 0)) bullets.push(`سبب خسارة ${r.sym}: ${CAUSE_AR[classifyLoss(r)]}.`);
   const tMissed = today.sig.filter((s) => !s.accepted && s.sim && s.sim.t1);
   if (tMissed.length) bullets.push(`فرص فاتت اليوم ووصلت الهدف 1: ${tMissed.slice(0, 4).map((s) => `${s.sym} (${(s.why || []).map((f) => FAIL_AR[f] || f).join('، ')})`).join(' · ')}.`);
