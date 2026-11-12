@@ -26,6 +26,9 @@ const samples = [];
 for (const setup of ['ORB15', 'ORB5', 'VWAP', 'FLAG', 'PMH', 'PDH', 'EMA', 'DIP']) for (let i = 0; i < 60; i++) samples.push({ setup, mfe: [0.3, 0.8, 1.6, 2.1, 2.6, 3.4, 1.8, 4.2, 0.5, 2.0][i % 10], score: 'mid', tod: 'morning', regime: 'flat', src: 'seed' });
 fs.writeFileSync(path.join(dataDir, 'model.json'), JSON.stringify({ v: 1, samples, calib: [], trainedAt: 0, sources: { seed: samples.length } }));
 
+// An approved tuning proposal: ORB15 in a falling market exits with a single 2R target (checked below).
+fs.writeFileSync(path.join(dataDir, 'proposals.json'), JSON.stringify([{ id: 'tune-ORB15-trendDown-r2', status: 'approved', text: 'test' }, { id: 'tune-ORB5-range-r2', status: 'new', text: 'not approved' }]));
+
 const mock = spawn(process.execPath, ['test/mock.js'], { env, stdio: ['ignore', 'pipe', 'inherit'] });
 await new Promise((r) => mock.stdout.once('data', r));
 const t0 = Date.now();
@@ -64,6 +67,8 @@ const checks = [
   ['tracked recs are outside the stats, the week and phone alerts', (() => { const tr = recs.filter((r) => r.counted === false); const st = liveObj && liveObj.stats && liveObj.stats.today; const cnt = recs.filter((r) => r.counted !== false); return !st || (st.issued === cnt.length && st.monitored === tr.length) ; })()],
   ['every armed dip is logged with how it ended', (() => { const a = read(`days/${DAY}/armed.json`, []); return a.length >= 1 && a.some((x) => x.outcome === 'fired'); })()],
   ['dip plan: single target, sell everything there', recs.filter((r) => r.setup === 'DIP').every((r) => r.plan.exit === 'full' && Math.abs(r.plan.targets[0].r - 1.5) < 0.01 && r.plan.stopAtr >= 0.99)],
+  ['approved tuning proposal applies to its setup in its market state only', (() => { const o = signals.filter((x) => x.setup === 'ORB15' && x.state === 'trendDown'); const other = signals.filter((x) => x.setup === 'ORB5'); return o.length >= 1 && o.every((x) => x.tuned === 'tune-ORB15-trendDown-r2' && x.plan.exit === 'full' && Math.abs(x.plan.targets[0].r - 2) < 0.01) && other.every((x) => !x.tuned); })()],
+  ['signals carry the market state when known', signals.some((x) => x.state) && signals.every((x) => x.state == null || ['trendUp', 'trendDown', 'range', 'choppy'].includes(x.state))],
   ['never asks for SIP newer than 15 minutes', cap.sipRecent === 0],
   ['wide IEX quote does not inflate the spread', signals.every((s) => s.plan.spread <= 0.1) && recs.every((r) => r.plan.spread <= 0.1)],
 ];

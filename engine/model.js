@@ -121,6 +121,17 @@ export function expectancy(setup, feats = {}) {
   return { ev, n, win: all.filter((s) => s.r > 0).length / n };
 }
 
+// What this setup has done in this market state (trend up/down, sideways, choppy): mean outcome of the samples
+// recorded with that state, shrunk toward zero like expectancy(). No state, or no cases, gives n = 0.
+export function stateEdge(setup, state) {
+  if (!state) return { ev: 0, n: 0, win: null };
+  const all = load().samples.filter((s) => s.setup === setup && s.state === state && typeof s.r === 'number');
+  const n = all.length;
+  if (!n) return { ev: 0, n: 0, win: null };
+  const mean = all.reduce((a, s) => a + s.r, 0) / n;
+  return { ev: +((mean * n) / (n + K)).toFixed(3), n, win: +(all.filter((s) => s.r > 0).length / n).toFixed(2) };
+}
+
 export function addCalib(pred, hit) {
   const m = load();
   m.calib.push({ p: +pred.toFixed(3), h: hit ? 1 : 0 });

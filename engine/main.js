@@ -2,7 +2,7 @@
 // prepare (universe, Shariah screen, model, week) → pre-market → session scan, watchlist,
 // signals, recommendations → flat before the bell → audit, analyst, backup.
 import fs from 'node:fs';
-import { DEFAULTS, ENV, VERSION, APP_VERSION } from './config.js';
+import { DEFAULTS, ENV, VERSION, APP_VERSION, EXIT_FAMILIES } from './config.js';
 import { now, ny, sleep, nyToUtc, hmToMin, minToHm, fallbackSession, addDays } from './clock.js';
 import { log, warn, recentErrors } from './log.js';
 import { alpaca } from './alpaca.js';
@@ -22,7 +22,7 @@ import { auditDay } from './audit.js';
 import { bootstrap } from './backtest.js';
 import { runLab } from './lab.js';
 import { matchProfile, profilesSummary } from './profiles.js';
-import { runAnalyst, CAUSE_AR, FAIL_AR } from './analyst.js';
+import { runAnalyst, CAUSE_AR, FAIL_AR, tuneFor } from './analyst.js';
 import { finnhub } from './finnhub.js';
 import * as model from './model.js';
 import * as live from './live.js';
@@ -227,13 +227,26 @@ async function runDay(day, sess) {
     try {
       const t = now();
       const regime = rt.mkt ? rt.mkt.regime : 'flat';
+      const mstate = (rt.mkt && rt.mkt.state) || null;
       const R = rules();
       // Size from the current balance: week start capital plus this week's closed net so far (Monday starts at capital).
       const equity = +(cfg.capital + weekStats(ny(t).ymd).net).toFixed(2);
       const eff = { ...cfg, capital: equity, probMinT1: cfg.probMinT1 + (R.probBoost || 0), recTo: minToHm(recToMin) };
+      // An approved tuning proposal (tune-<SETUP>-<state>-<exit>) changes this setup's exit in that market state only.
+      const tuned = tuneFor(setup.type, mstate);
+      if (tuned) {
+        const k = EXIT_FAMILIES[tuned.fam];
+        eff.fixedR = { ...(cfg.fixedR || {}) };
+        if (k) eff.fixedR[setup.type] = k; else delete eff.fixedR[setup.type];
+      }
       const p = makePlan(setup, it.ctx, { spread: it.spread }, eff, { score: it.score, regime });
-      const SOFT = cfg.learnPhase ? new Set(['ev', 'prob']) : new Set(); // logged, never blocking, in the learning phase
+      const SOFT = cfg.learnPhase ? new Set(['ev', 'prob']) : new Set(); // logged, not blocking, in the learning phase
       const why = [...p.fails, ...recs.guard(it.sym, eff, setup.type)];
+      // Sanity floors: even in the learning phase the extreme tail (near-zero probability, hopeless value) is blocked.
+      if (cfg.learnPhase) {
+        if (p.targets[0].prob < cfg.learnProbFloor) why.push('probFloor');
+        if (p.ev != null && p.ev < cfg.learnEvFloor) why.push('evFloor');
+      }
       if ((R.earningsToday || []).includes(it.sym)) why.push('earnings');
       // The dip setup did best on down days in the lab, so the down-market rule applies to the others only.
       if (p.exit !== 'full' && regime === 'down' && p.targets[0].prob < eff.probMinT1 + 0.1) why.push('market');
@@ -254,14 +267,17 @@ async function runDay(day, sess) {
         p.sizing.riskUsd = +(p.sizing.shares * p.R + p.sizing.fees).toFixed(2);
         for (const tg of p.targets) tg.netUsd = +(p.sizing.shares * (tg.price - p.entry) - p.sizing.fees).toFixed(2);
       }
+      // Selection by market state: a setup that has done clearly badly in this state (enough cases) takes no primary slot.
+      const se = model.stateEdge(setup.type, mstate);
+      const stateBad = cfg.learnPhase && se.n >= cfg.stateMinN && se.ev <= cfg.stateBadEv;
       const accepted = why.every((w) => SOFT.has(w));
       const weak = why.filter((w) => SOFT.has(w));
       const profile = matchProfile(cfg, { setup: setup.type, plan: p, minAfterOpen: it.ctx.minAfterOpen, feats: it.feats, regime });
-      const sig = { id: `${day}-${it.sym}-${setup.type}-${t}`, day, sym: it.sym, setup: setup.type, label: setup.label, firedAt: t, firedNy: ny(t).hm, plan: p, accepted, why, score: it.score, minAfterOpen: it.ctx.minAfterOpen, regime, state: (rt.mkt && rt.mkt.state) || null, feats: it.feats, version: VERSION, ...(weak.length ? { weak } : {}), ...(pausedByUser ? { pausedByUser: true } : {}), ...(profile ? { profile } : {}) };
+      const sig = { id: `${day}-${it.sym}-${setup.type}-${t}`, day, sym: it.sym, setup: setup.type, label: setup.label, firedAt: t, firedNy: ny(t).hm, plan: p, accepted, why, score: it.score, minAfterOpen: it.ctx.minAfterOpen, regime, state: mstate, ...(se.n ? { stateEv: se.ev, stateN: se.n } : {}), ...(stateBad ? { stateBad: true } : {}), ...(tuned ? { tuned: tuned.id } : {}), feats: it.feats, version: VERSION, ...(weak.length ? { weak } : {}), ...(pausedByUser ? { pausedByUser: true } : {}), ...(profile ? { profile } : {}) };
       signals.upsert(sig); signals.flush();
       log(`signal ${it.sym} ${setup.type} ${accepted ? `ACCEPTED${weak.length ? ` (weak: ${weak.join(',')})` : ''}` : `rejected (${why.join(',')})`}${profile ? ` · profile ${profile}` : ''}`);
       if (accepted) {
-        recs.issue({ it, setup, plan: p, feats: it.feats, market: rt.mkt, sh: recordOf(it.sym), events: R.events });
+        recs.issue({ it, setup, plan: p, feats: it.feats, market: rt.mkt, sh: recordOf(it.sym), events: R.events, trackOnly: stateBad });
         publishLive(true);
       }
     } catch (e) { warn('onSignal', e); }

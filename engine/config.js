@@ -2,6 +2,11 @@
 // in the app's settings is merged on top of these at runtime (see live.js).
 import path from 'node:path';
 
+// Exit families the lab compares: 'mgmt' is the three-target management, the others sell everything at k·R.
+export const EXIT_FAMILIES = { mgmt: null, r1: 1, r15: 1.5, r2: 2 };
+export const EXIT_FAMILY_AR = { mgmt: 'إدارة بثلاثة أهداف', r1: 'هدف 1R (بيع كامل)', r15: 'هدف 1.5R (بيع كامل)', r2: 'هدف 2R (بيع كامل)' };
+export const STATE_NAMES_AR = { trendUp: 'اتجاه صاعد', trendDown: 'اتجاه هابط', range: 'جانبي', choppy: 'متذبذب بشدة' };
+
 export const VERSION = 'S1.3';
 export const APP_VERSION = '1.3.3';
 
@@ -42,6 +47,10 @@ export const DEFAULTS = {
   // recommendation is open, new ones are issued too, but only tracked (counted: false): they never enter the
   // weekly target, the balance or the daily limits, and send no phone alert.
   learnPhase: true,
+  learnProbFloor: 0.06,        // sanity floors for the learning phase: only the extreme tail is blocked (about the lowest 5%
+  learnEvFloor: -1.2,          // of signals by probability and by expected value); the normal gates only log
+  stateMinN: 30,               // a setup with at least this many cases in the current market state...
+  stateBadEv: -0.15,           // ...and a shrunk mean below this takes no primary slot there: it is tracked only
   recSetups: ['ORB5', 'ORB15', 'VWAP', 'FLAG', 'EMA', 'DIP', 'PMH', 'PDH'], // setups that may become recommendations
   recMinN: 30,                 // other setups qualify once the model has this many trades for them...
   recMinEv: 0.10,              // ...and their expected value (R, shrunk, adjusted for the market state) reaches this

@@ -1,14 +1,14 @@
 // Daily analyst: classifies why trades lost, finds missed opportunities, and proposes changes
 // in any area (discovery, entry, stop, targets, timing, setups) with a what-if from recorded
 // signals. Rule-based by default; adds a written report from Claude when a key is configured.
-import { ENV, DEFAULTS } from './config.js';
+import { ENV, DEFAULTS, EXIT_FAMILIES, EXIT_FAMILY_AR, STATE_NAMES_AR } from './config.js';
 import { request } from './http.js';
 import { readJSON, writeJSON, dayRel, listDays } from './store.js';
 import * as model from './model.js';
 import { warn } from './log.js';
 
 const CAUSE_AR = { noise: 'وقف داخل ضجيج السهم', ext: 'دخول ممتد بعد دفعة', market: 'السوق انعكس', late: 'اكتشاف متأخر', spread: 'سيولة أو سبريد', time: 'لم يتحرك (خروج بالوقت)', other: 'أخرى' };
-const FAIL_AR = { prob: 'الاحتمال', ev: 'القيمة المتوقعة', rr: 'العائد للمخاطرة', cost: 'التكلفة', stop: 'وقف بعيد', spread: 'السبريد', ext: 'الامتداد', window: 'خارج الوقت', max: 'الحد اليومي', dailyLoss: 'حد الخسارة', cooldown: 'التهدئة', dup: 'تكرار', earnings: 'يوم أرباح', market: 'السوق هابط', shadow: 'نمط للمراقبة فقط', paused: 'نمط موقوف بقرارك', busy: 'صفقة مفتوحة' };
+const FAIL_AR = { prob: 'الاحتمال', ev: 'القيمة المتوقعة', rr: 'العائد للمخاطرة', cost: 'التكلفة', stop: 'وقف بعيد', spread: 'السبريد', ext: 'الامتداد', window: 'خارج الوقت', max: 'الحد اليومي', dailyLoss: 'حد الخسارة', cooldown: 'التهدئة', dup: 'تكرار', earnings: 'يوم أرباح', market: 'السوق هابط', shadow: 'نمط للمراقبة فقط', paused: 'نمط موقوف بقرارك', busy: 'صفقة مفتوحة', probFloor: 'احتمال شبه معدوم', evFloor: 'قيمة متوقعة سيئة جداً' };
 
 // Arabic counted nouns: 3–10 take the plural, 11 and up the singular.
 const cn = (k, plural, singular) => `${k} ${k >= 3 && k <= 10 ? plural : singular}`;
@@ -121,6 +121,7 @@ export function rulesReport(day) {
   const TOD_AR = { open: 'أول 30 دقيقة', morning: 'الصباح', midday: 'منتصف اليوم', late: 'آخر الجلسة' };
   for (const [k, xs] of Object.entries(byTod)) if (xs.length >= 10 && avgR(xs) < -0.2) props.push({ id: `tod-${k}`, aspect: 'التوقيت', text: `شدّد الشروط في ${TOD_AR[k]}`, why: `إشارات ${TOD_AR[k]} متوسطها ${avgR(xs).toFixed(2)}R على ${cn(xs.length, 'إشارات', 'إشارة')}، يعني خاسرة بالمتوسط`, effect: `توصيات أقل في ${TOD_AR[k]}، وتبقى بس الإشارات الأقوى` });
 
+  props.push(...tuneProposals());
   return { day, at: Date.now(), source: 'rules', bullets, causes: causeList, proposals: props, losers: losers.length, filters: filterCompare(sig), filtersWeek: filterCompare(weekSig(day)) };
 }
 
@@ -190,6 +191,86 @@ export function strategyTable() {
   return { at: Date.now(), minN: MIN_N, rows, best, stateRows: stRows, bestState };
 }
 
+// Per (setup, market state): the exit that did best on the older sessions of the lab and still beats the
+// current exit on the newer ones (out of sample), net of costs. Needs lab rows that carry the market state
+// ('st'), which exist from the first lab run after the state was added. Proposals only; the user approves.
+export function tuneProposals(opts = {}) {
+  const { minTrain = 40, minTest = 20, margin = 0.05 } = opts;
+  const lab = readJSON('lab/trades-latest.json', null);
+  if (!lab || !Array.isArray(lab.rows) || !lab.testFrom) return [];
+  const cells = {};
+  for (const r of lab.rows) {
+    if (!r.st || !r.x || !r.ty) continue;
+    (cells[`${r.ty}|${r.st}`] = cells[`${r.ty}|${r.st}`] || []).push(r);
+  }
+  const mean = (xs, f) => xs.reduce((a, r) => a + r.x[f], 0) / xs.length;
+  const out = [];
+  for (const [key, xs] of Object.entries(cells)) {
+    const [ty, st] = key.split('|');
+    const tr = xs.filter((r) => r.d < lab.testFrom), te = xs.filter((r) => r.d >= lab.testFrom);
+    if (tr.length < minTrain || te.length < minTest) continue;
+    const cur = (DEFAULTS.fixedR || {})[ty] ? Object.keys(EXIT_FAMILIES).find((f) => EXIT_FAMILIES[f] === DEFAULTS.fixedR[ty]) || 'mgmt' : 'mgmt';
+    const fams = Object.keys(EXIT_FAMILIES).filter((f) => tr.every((r) => typeof r.x[f] === 'number') && te.every((r) => typeof r.x[f] === 'number'));
+    if (!fams.includes(cur)) continue;
+    const best = fams.slice().sort((a, b) => mean(tr, b) - mean(tr, a))[0];
+    if (best === cur) continue;
+    const gain = mean(te, best) - mean(te, cur);
+    if (gain < margin) continue;
+    out.push({
+      id: `tune-${ty}-${st}-${best}`, aspect: 'النمط وشكل السوق',
+      text: `في سوق «${STATE_NAMES_AR[st] || st}» غيّر خروج ${ty} من «${EXIT_FAMILY_AR[cur]}» إلى «${EXIT_FAMILY_AR[best]}»`,
+      why: `الأفضل على الجلسات القديمة (${tr.length} صفقة): ${mean(tr, best).toFixed(2)}R مقابل ${mean(tr, cur).toFixed(2)}R. وعلى الجلسات الأحدث (${te.length} صفقة، خارج العينة): ${mean(te, best).toFixed(2)}R مقابل ${mean(te, cur).toFixed(2)}R بعد العمولة`,
+      effect: `إذا انطبق، ${ty} في هذا الشكل من السوق يخرج بـ«${EXIT_FAMILY_AR[best]}». غيره ما يتغير، وتقدر ترجعه برفض الاقتراح`,
+      by: 'rules', gain: +gain.toFixed(3),
+    });
+  }
+  return out.sort((a, b) => b.gain - a.gain).slice(0, 6);
+}
+
+// The approved tuning proposal (tune-<SETUP>-<state>-<exit>) for this setup in this market state, if any.
+export function tuneFor(setupType, state) {
+  if (!state) return null;
+  for (const p of readJSON('proposals.json', [])) {
+    if (p.status !== 'approved') continue;
+    const m = /^tune-([A-Z0-9]+)-(trendUp|trendDown|range|choppy)-(mgmt|r1|r15|r2)$/.exec(String(p.id));
+    if (m && m[1] === setupType && m[2] === state) return { id: p.id, fam: m[3] };
+  }
+  return null;
+}
+
+// Mistakes that come back week after week. Rebuilt from the day files on every run: per week, how often each
+// loss cause (and each loss cause per setup) occurred among the audited signals that lost, and how often each
+// filter turned away a signal that then reached target 1. A key repeats when it appears at least `minPerWeek`
+// times in at least two different weeks.
+export function errorsLedger(opts = {}) {
+  const { minPerWeek = 3, minWeeks = 2 } = opts;
+  const weeks = {};
+  for (const d of listDays()) {
+    const mon = mondayOf(d);
+    const w = (weeks[mon] = weeks[mon] || { signals: 0, counts: {} });
+    for (const s of readJSON(dayRel(d, 'signals.json'), [])) {
+      if (!s.sim) continue;
+      w.signals++;
+      const add = (k) => { w.counts[k] = (w.counts[k] || 0) + 1; };
+      if (s.sim.r < 0) { const c = classifyLoss(s); add(`loss|${c}`); add(`loss|${c}|${s.setup}`); }
+      if (!s.accepted && s.sim.t1) for (const f of new Set(s.why || [])) add(`missed|${f}`);
+    }
+  }
+  const keys = new Set(Object.values(weeks).flatMap((w) => Object.keys(w.counts)));
+  const repeated = [];
+  for (const k of keys) {
+    const hit = Object.entries(weeks).filter(([, w]) => (w.counts[k] || 0) >= minPerWeek).map(([mon, w]) => ({ week: mon, n: w.counts[k] }));
+    if (hit.length < minWeeks) continue;
+    const [kind, a, setup] = k.split('|');
+    const label = kind === 'loss' ? `خسائر بسبب «${CAUSE_AR[a] || a}»${setup ? ` في نمط ${setup}` : ''}` : `فرص رابحة رفضها شرط «${FAIL_AR[a] || a}»`;
+    repeated.push({ key: k, label, weeks: hit, total: hit.reduce((x, h) => x + h.n, 0) });
+  }
+  repeated.sort((x, y) => y.weeks.length - x.weeks.length || y.total - x.total);
+  const out = { at: Date.now(), weeks, repeated: repeated.slice(0, 12) };
+  writeJSON('errors.json', out);
+  return out;
+}
+
 export async function runAnalyst(day) {
   const base = rulesReport(day);
   const res = await claudeReport(day, base);
@@ -210,6 +291,9 @@ export async function runAnalyst(day) {
   const proposals = Object.values(byId).slice(-40);
   writeJSON('proposals.json', proposals);
   const report = { ...base, kind: weekly ? 'weekly' : 'daily', bullets: ai ? [...ai.bullets] : base.bullets, source: ai ? 'claude' : 'rules', ...(res && res.error ? { claudeError: res.error } : {}) };
+  const led = errorsLedger();
+  report.repeated = led.repeated;
+  if (led.repeated.length) report.bullets = [...report.bullets, `أخطاء تتكرر بين الأسابيع: ${led.repeated.slice(0, 3).map((r) => `${r.label} (${r.weeks.length} أسابيع، ${r.total} حالة)`).join(' · ')}.`];
   writeJSON(dayRel(day, 'analyst.json'), report);
   writeJSON('strategy.json', strategyTable());
   return { report, proposals };

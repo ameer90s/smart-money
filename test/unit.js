@@ -189,9 +189,10 @@ t('market state: big swings back and forth across VWAP are choppy', () => {
   assert.equal(m.state, 'choppy', JSON.stringify(m));
   assert.ok(m.crosses >= 3 && m.amp >= 0.25);
 });
-t('market state: no state before 30 minutes, and no look-ahead', () => {
+t('market state: no state before 15 minutes, and no look-ahead', () => {
   const bars = mkSpy((i, b) => b + i * 0.05);
-  assert.equal(marketState(bars, 500, at(20), spyOpen), null);
+  assert.equal(marketState(bars, 500, at(10), spyOpen), null);
+  assert.ok(marketState(bars, 500, at(20), spyOpen));
   const early = marketState(bars, 500, at(60), spyOpen);
   const sameWithFuture = marketState(bars.concat(mkSpy((i, b) => b - 50, 10).map((x, i) => ({ ...x, t: new Date(spyOpen + (120 + i) * 60000).toISOString() }))), 500, at(60), spyOpen);
   assert.deepEqual(early, sameWithFuture);

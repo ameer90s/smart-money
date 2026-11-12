@@ -16,7 +16,7 @@ export const STATE_AR = { trendUp: 'اتجاه صاعد', trendDown: 'اتجاه
 export const STATE_CFG = {
   step: 5, // minutes per sample
   window: 60, // minutes looked back
-  minSamples: 6, // no state before 30 minutes of trading
+  minSamples: 3, // no state before 15 minutes of trading; the first reads (15–30 min) are rough, over a short window
   trendEr: 0.35, // er at or above this is a trend
   choppyCrosses: 3, // VWAP crossings that mark a choppy tape...
   choppyAmp: 0.25, // ...when the swings are also big enough to matter (% of previous close)

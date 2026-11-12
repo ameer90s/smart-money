@@ -44,10 +44,10 @@ export class Recs {
     return why;
   }
 
-  issue({ it, setup, plan, feats, market, sh, events }) {
+  issue({ it, setup, plan, feats, market, sh, events, trackOnly = false }) {
     const t = now();
     // The first recommendation while no counted one is open has priority and counts; later ones are tracked only.
-    const counted = !this.active().some((r) => r.counted !== false);
+    const counted = !trackOnly && !this.active().some((r) => r.counted !== false);
     const rec = {
       id: `${this.day}-${it.sym}-${setup.type}`, counted, day: this.day, sym: it.sym, name: it.name, version: VERSION,
       firedAt: t, firedNy: ny(t).hm, validUntil: t + 15 * 60000,
@@ -59,7 +59,7 @@ export class Recs {
       snapshot: { feats, ctx: ctxSnap(it.ctx), market, setup, scoreAtAdd: it.scoreAtAdd, watchAddedAt: it.addedAt, events: events || [] },
       timeline: [
         { t: it.addedAt, what: 'دخل قائمة المراقبة', note: `الدرجة ${it.scoreAtAdd}` },
-        { t, what: counted ? 'صدرت التوصية' : 'صدرت للمراقبة فقط (توصية أخرى مفتوحة)', note: setup.label },
+        { t, what: counted ? 'صدرت التوصية' : trackOnly ? 'صدرت للمراقبة فقط (النمط ضعيف في شكل السوق الحالي)' : 'صدرت للمراقبة فقط (توصية أخرى مفتوحة)', note: setup.label },
       ],
       user: null,
     };
