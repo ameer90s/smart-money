@@ -14,7 +14,7 @@ export const DEFAULTS = {
   capital: 1000,          // virtual account, USD
   feePerSide: 1,          // eToro commission per open/close, USD
   minPrice: 3,
-  maxPrice: 500,
+  maxPrice: 200,
   minDollarVol: 5e6,      // SIP 20-day average dollar volume
   scanEverySec: 20,
   preScanEverySec: 60,
