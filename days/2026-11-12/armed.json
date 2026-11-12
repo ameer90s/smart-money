@@ -1,0 +1,1 @@
+[{"sym":"ENS","type":"DIP","trigger":148.45,"stop":147.8917,"inplay":true,"t":1794503820104,"until":1794504000104,"outcome":"expired","endAt":1794504004045,"price":null},{"sym":"CAE","type":"DIP","trigger":28.07,"stop":27.9963,"inplay":true,"t":1794504000105,"until":1794504180105,"outcome":"fired","endAt":1794504030371,"price":28.08}]
