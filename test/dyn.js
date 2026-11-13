@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-dyn-'));
 process.env.DATA_DIR = dir;
 const write = (rel, obj) => { fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); fs.writeFileSync(path.join(dir, rel), JSON.stringify(obj)); };
-const { dynProposals, dynFor } = await import('../engine/analyst.js');
+const { dynProposals, dynFor, extProposals, extFor } = await import('../engine/analyst.js');
 const { plan } = await import('../engine/planner.js');
 const { DEFAULTS, DYN_STOPS, DYN_TARGETS } = await import('../engine/config.js');
 let n = 0;
@@ -52,5 +52,26 @@ t('planner: approved fixed stop distance replaces the structural stop', () => {
   const dyn = plan(setup, ctx, { spread: 0.01 }, { ...DEFAULTS, capital: 5000, stopFixedAtr: { VWAP: 1.5 } }, {});
   assert.ok(Math.abs(dyn.R - 0.3) < 1e-9, String(dyn.R));
   assert.notEqual(base.R, dyn.R);
+});
+
+// extension cap: far-from-VWAP trades lose, near ones win, in both samples
+const er = [];
+const mkE = (ty, st, d, ext, m) => er.push({ ty, st, d, ext, e: 20, sp: 0.02, R: 0.2, x: { mgmt: m } });
+for (let i = 0; i < 80; i++) mkE('EMA', 'range', `2026-08-${String(1 + (i % 20)).padStart(2, '0')}`, i % 2 ? 0.4 : 1.8, i % 2 ? 0.5 : -0.6);
+for (let i = 0; i < 40; i++) mkE('EMA', 'range', `2026-10-${String(1 + (i % 20)).padStart(2, '0')}`, i % 2 ? 0.4 : 1.8, i % 2 ? 0.5 : -0.6);
+for (let i = 0; i < 80; i++) mkE('ORB5', 'range', `2026-08-${String(1 + (i % 20)).padStart(2, '0')}`, i % 2 ? 0.4 : 1.8, 0.1);
+for (let i = 0; i < 40; i++) mkE('ORB5', 'range', `2026-10-${String(1 + (i % 20)).padStart(2, '0')}`, i % 2 ? 0.4 : 1.8, 0.1);
+write('lab/trades-latest.json', { at: 1, testFrom: '2026-09-22', rows: er });
+t('ext: proposes a tighter cap only when it helps in both samples', () => {
+  const ids = extProposals().map((x) => x.id);
+  assert.ok(ids.some((i) => /^ext-EMA-range-c(0_5|1)$/.test(i)), ids.join());
+  assert.ok(!ids.some((i) => i.startsWith('ext-ORB5')), ids.join());
+});
+t('ext: only approved caps are looked up', () => {
+  write('proposals.json', [{ id: 'ext-EMA-range-c1', status: 'pending' }]);
+  assert.equal(extFor('EMA', 'range'), null);
+  write('proposals.json', [{ id: 'ext-EMA-range-c1', status: 'approved' }]);
+  assert.equal(extFor('EMA', 'range').cap, 1);
+  assert.equal(extFor('EMA', 'choppy'), null);
 });
 console.log(`${n} checks`);

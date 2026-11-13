@@ -124,6 +124,7 @@ export function rulesReport(day) {
 
   props.push(...tuneProposals());
   props.push(...dynProposals());
+  props.push(...extProposals());
   return { day, at: Date.now(), source: 'rules', bullets, causes: causeList, proposals: props, losers: losers.length, filters: filterCompare(sig), filtersWeek: filterCompare(weekSig(day)) };
 }
 
@@ -288,6 +289,54 @@ export function dynFor(setupType, state) {
     if (p.status !== 'approved') continue;
     const m = /^dyn-([A-Z0-9]+)-(trendUp|trendDown|range|choppy)-s(\d+(?:_\d+)?)-k(\d+(?:_\d+)?)$/.exec(String(p.id));
     if (m && m[1] === setupType && m[2] === state) return { id: p.id, stopAtr: +m[3].replace('_', '.'), k: +m[4].replace('_', '.') };
+  }
+  return null;
+}
+
+// Dynamic extension cap per (setup, market state): the largest distance from VWAP (in 5-minute ATRs) a signal may
+// have, chosen from the lab rows. A tighter cap is proposed only when dropping the more extended trades raises the
+// net mean on the older sessions AND on the newer ones (out of sample), and keeps at least a third of the trades.
+export function extProposals(opts = {}) {
+  const { minTrain = 40, minTest = 20, margin = 0.05, caps = [0.5, 1, 1.5, 2, 3] } = opts;
+  const lab = readJSON('lab/trades-latest.json', null);
+  if (!lab || !Array.isArray(lab.rows) || !lab.testFrom) return [];
+  const cap0 = DEFAULTS.extMaxAtr5, cap = DEFAULTS.capital, fee = 2 * DEFAULTS.feePerSide;
+  const net = (r) => { const R = r.R || 0; if (!(R > 0) || !r.e || typeof r.x?.mgmt !== 'number') return null; return r.x.mgmt - (fee / Math.max(1, cap / r.e) + (r.sp || 0.01)) / R; };
+  const mean = (xs) => (xs.length ? xs.reduce((a, b) => a + net(b), 0) / xs.length : 0);
+  const cells = {};
+  for (const r of lab.rows) if (r.ty && r.st && typeof r.ext === 'number' && net(r) != null && r.ext <= cap0) (cells[`${r.ty}|${r.st}`] = cells[`${r.ty}|${r.st}`] || []).push(r);
+  const out = [];
+  for (const [key, xs] of Object.entries(cells)) {
+    const [ty, st] = key.split('|');
+    const tr = xs.filter((r) => r.d < lab.testFrom), te = xs.filter((r) => r.d >= lab.testFrom);
+    if (tr.length < minTrain || te.length < minTest) continue;
+    let best = null;
+    for (const c of caps.filter((c) => c < cap0)) {
+      const ktr = tr.filter((r) => r.ext <= c), kte = te.filter((r) => r.ext <= c);
+      if (ktr.length < tr.length / 3 || kte.length < Math.max(8, te.length / 3)) continue;
+      const gtr = mean(ktr) - mean(tr), gte = mean(kte) - mean(te);
+      if (gtr < margin || gte < margin) continue;
+      if (!best || gte > best.gte) best = { c, gtr, gte, ntr: ktr.length, nte: kte.length };
+    }
+    if (!best) continue;
+    out.push({
+      id: `ext-${ty}-${st}-c${String(best.c).replace('.', '_')}`, aspect: 'حد الامتداد الديناميكي',
+      text: `في سوق «${STATE_NAMES_AR[st] || st}» لا تدخل ${ty} إذا ابتعد السعر أكثر من ${best.c} ATR عن VWAP`,
+      why: `استبعاد الأبعد يرفع المتوسط ${best.gtr.toFixed(2)}R على الجلسات القديمة (${best.ntr} من ${tr.length}) و${best.gte.toFixed(2)}R على الأحدث خارج العينة (${best.nte} من ${te.length})، بعد العمولة`,
+      effect: `${ty} في هذا الشكل من السوق يرفض الإشارات الأبعد من ${best.c} ATR (الحد الحالي ${cap0}). غيره ما يتغير`,
+      by: 'rules', gain: +best.gte.toFixed(3),
+    });
+  }
+  return out.sort((a, b) => b.gain - a.gain).slice(0, 6);
+}
+
+// The approved extension cap (ext-<SETUP>-<state>-c<cap>) for this setup in this market state, if any.
+export function extFor(setupType, state) {
+  if (!state) return null;
+  for (const p of readJSON('proposals.json', [])) {
+    if (p.status !== 'approved') continue;
+    const m = /^ext-([A-Z0-9]+)-(trendUp|trendDown|range|choppy)-c(\d+(?:_\d+)?)$/.exec(String(p.id));
+    if (m && m[1] === setupType && m[2] === state) return { id: p.id, cap: +m[3].replace('_', '.') };
   }
   return null;
 }
