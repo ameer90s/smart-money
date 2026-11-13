@@ -22,7 +22,7 @@ import { auditDay } from './audit.js';
 import { bootstrap } from './backtest.js';
 import { runLab } from './lab.js';
 import { matchProfile, profilesSummary } from './profiles.js';
-import { runAnalyst, CAUSE_AR, FAIL_AR, tuneFor, dynFor, extFor, confirmFor } from './analyst.js';
+import { runAnalyst, CAUSE_AR, FAIL_AR, tuneFor, dynFor, extFor, confirmFor, applyReverts } from './analyst.js';
 import { finnhub } from './finnhub.js';
 import * as model from './model.js';
 import * as live from './live.js';
@@ -70,7 +70,7 @@ async function refreshSettings() {
     if (c.type === 'proposal') {
       const props = readJSON('proposals.json', []);
       const p = props.find((x) => x.id === c.proposal);
-      if (p && ['approved', 'rejected'].includes(c.status)) { p.status = c.status; p.decidedAt = now(); writeJSON('proposals.json', props); }
+      if (p && ['approved', 'rejected'].includes(c.status)) { p.status = c.status; p.decidedAt = now(); writeJSON('proposals.json', applyReverts(props)); }
     }
   }
   state.cmdSeen = state.cmdSeen.slice(-200);
@@ -241,6 +241,7 @@ async function runDay(day, sess) {
       }
       const extCap = extFor(setup.type, mstate);
       if (extCap) eff.extMaxAtr5 = Math.min(eff.extMaxAtr5, extCap.cap);
+      const conf = confirmFor(setup.type, mstate);
       const dyn = dynFor(setup.type, mstate);
       if (dyn) {
         eff.stopFixedAtr = { ...(cfg.stopFixedAtr || {}), [setup.type]: dyn.stopAtr };
@@ -280,7 +281,7 @@ async function runDay(day, sess) {
       const accepted = why.every((w) => SOFT.has(w));
       const weak = why.filter((w) => SOFT.has(w));
       const profile = matchProfile(cfg, { setup: setup.type, plan: p, minAfterOpen: it.ctx.minAfterOpen, feats: it.feats, regime });
-      const sig = { id: `${day}-${it.sym}-${setup.type}-${t}`, day, sym: it.sym, setup: setup.type, label: setup.label, firedAt: t, firedNy: ny(t).hm, plan: p, accepted, why, score: it.score, minAfterOpen: it.ctx.minAfterOpen, regime, state: mstate, ...(se.n ? { stateEv: se.ev, stateN: se.n } : {}), ...(stateBad ? { stateBad: true } : {}), ...(tuned ? { tuned: tuned.id } : {}), ...(dyn ? { dyn: dyn.id } : {}), ...(extCap ? { extCap: extCap.id } : {}), feats: it.feats, version: VERSION, ...(weak.length ? { weak } : {}), ...(pausedByUser ? { pausedByUser: true } : {}), ...(profile ? { profile } : {}) };
+      const sig = { id: `${day}-${it.sym}-${setup.type}-${t}`, day, sym: it.sym, setup: setup.type, label: setup.label, firedAt: t, firedNy: ny(t).hm, plan: p, accepted, why, score: it.score, minAfterOpen: it.ctx.minAfterOpen, regime, state: mstate, ...(se.n ? { stateEv: se.ev, stateN: se.n } : {}), ...(stateBad ? { stateBad: true } : {}), ...(tuned ? { tuned: tuned.id } : {}), ...(dyn ? { dyn: dyn.id } : {}), ...(extCap ? { extCap: extCap.id } : {}), ...(conf ? { conf: conf.id } : {}), feats: it.feats, version: VERSION, ...(weak.length ? { weak } : {}), ...(pausedByUser ? { pausedByUser: true } : {}), ...(profile ? { profile } : {}) };
       signals.upsert(sig); signals.flush();
       log(`signal ${it.sym} ${setup.type} ${accepted ? `ACCEPTED${weak.length ? ` (weak: ${weak.join(',')})` : ''}` : `rejected (${why.join(',')})`}${profile ? ` · profile ${profile}` : ''}`);
       if (accepted) {

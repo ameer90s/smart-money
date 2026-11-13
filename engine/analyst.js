@@ -276,7 +276,7 @@ export function dynProposals(opts = {}) {
         text: `في سوق «${STATE_NAMES_AR[st] || st}» خلّ وقف ${ty} ${S} ATR وهدفه ${K}R`,
         why: `الأفضل على الجلسات القديمة (${tr.length} صفقة): ${pooled(best.si, best.ki, tr).toFixed(2)}R. وعلى الأحدث (${te.length} صفقة، خارج العينة): ${pooled(best.si, best.ki, te).toFixed(2)}R مقابل ${pooled(curS, curK, te).toFixed(2)}R للإعداد الحالي، بعد العمولة`,
         effect: `${ty} في هذا الشكل من السوق يستخدم وقف ${S} ATR وهدف ${K}R بدل الإعداد الحالي. غيره ما يتغير`,
-        by: 'rules', gain: +gain.toFixed(3),
+        by: 'rules', gain: +gain.toFixed(3), expect: +pooled(best.si, best.ki, te).toFixed(3),
       });
     }
   }
@@ -325,7 +325,7 @@ export function extProposals(opts = {}) {
       text: `في سوق «${STATE_NAMES_AR[st] || st}» لا تدخل ${ty} إذا ابتعد السعر أكثر من ${best.c} ATR عن VWAP`,
       why: `استبعاد الأبعد يرفع المتوسط ${best.gtr.toFixed(2)}R على الجلسات القديمة (${best.ntr} من ${tr.length}) و${best.gte.toFixed(2)}R على الأحدث خارج العينة (${best.nte} من ${te.length})، بعد العمولة`,
       effect: `${ty} في هذا الشكل من السوق يرفض الإشارات الأبعد من ${best.c} ATR (الحد الحالي ${cap0}). غيره ما يتغير`,
-      by: 'rules', gain: +best.gte.toFixed(3),
+      by: 'rules', gain: +best.gte.toFixed(3), expect: +(mean(te.filter((r) => r.ext <= best.c))).toFixed(3),
     });
   }
   return out.sort((a, b) => b.gain - a.gain).slice(0, 6);
@@ -378,7 +378,7 @@ export function confirmProposals(opts = {}) {
       text: `في سوق «${STATE_NAMES_AR[st] || st}» انتظر ${m} دقيقة فوق نقطة الدخول قبل توصية ${ty}`,
       why: `الانتظار يرفع المتوسط ${best.gtr.toFixed(2)}R على الجلسات القديمة (يثبت ${kept} من ${tr.length}) و${best.gte.toFixed(2)}R على الأحدث خارج العينة (${te.length} صفقة)، بعد العمولة، مع احتساب الإشارات اللي سقطت كصفر`,
       effect: `${ty} في هذا الشكل من السوق ما يطلع توصية إلا بعد ما يثبت السعر ${m} دقيقة فوق الدخول. غيره ما يتغير`,
-      by: 'rules', gain: +best.gte.toFixed(3),
+      by: 'rules', gain: +best.gte.toFixed(3), expect: +mean(te, best.di).toFixed(3),
     });
   }
   return out.sort((a, b) => b.gain - a.gain).slice(0, 6);
@@ -439,6 +439,76 @@ export function errorsLedger(opts = {}) {
   return out;
 }
 
+// ---- Watching approved changes after they go live ----
+// Each signal records which approved proposals shaped it (tuned / dyn / extCap / conf). From the day a proposal was
+// approved, its live results (net of costs) are compared with what the lab promised. After MON_MIN signals, if the
+// live mean is negative AND still below the promise even with one standard error of slack, the proposal is marked
+// weak and a "revert-<id>" proposal is raised. The user approves the revert; nothing is undone automatically.
+export const MON_MIN = 30;
+const MON_PREFIX = /^(tune|dyn|ext|confirm)-/;
+function tagOf(s) { return [s.tuned, s.dyn, s.extCap, s.conf].filter(Boolean); }
+
+export function monitorApproved(opts = {}) {
+  const minN = opts.minN || MON_MIN;
+  const props = readJSON('proposals.json', []);
+  const act = props.filter((p) => p.status === 'approved' && MON_PREFIX.test(String(p.id)));
+  if (!act.length) return [];
+  const days = listDays();
+  const out = [];
+  for (const p of act) {
+    const from = p.decidedAt ? new Date(p.decidedAt + 4 * 3600e3).toISOString().slice(0, 10) : p.day || '';
+    const rs = [];
+    for (const d of days) {
+      if (d < from) continue;
+      for (const s of readJSON(dayRel(d, 'signals.json'), [])) {
+        if (!s.accepted || !s.sim || typeof s.sim.r !== 'number' || !tagOf(s).includes(p.id)) continue;
+        rs.push(s.sim.r - ((s.plan && s.plan.costR) || 0));
+      }
+    }
+    const n = rs.length;
+    const avg = n ? rs.reduce((a, b) => a + b, 0) / n : 0;
+    const sd = n > 1 ? Math.sqrt(rs.reduce((a, b) => a + (b - avg) ** 2, 0) / (n - 1)) : 0;
+    const se = n > 1 ? sd / Math.sqrt(n) : 0;
+    const promise = typeof p.expect === 'number' ? p.expect : 0;
+    let verdict = 'collecting';
+    if (n >= minN) verdict = avg < 0 && avg + se < promise ? 'weak' : 'ok';
+    out.push({ id: p.id, n, avg: +avg.toFixed(3), se: +se.toFixed(3), promise: +promise.toFixed(3), verdict });
+  }
+  return out;
+}
+
+// Writes the live status on each approved proposal and raises/clears revert proposals. Returns the proposal list.
+export function applyMonitor(props = readJSON('proposals.json', [])) {
+  const mon = monitorApproved();
+  const byId = Object.fromEntries(props.map((p) => [p.id, p]));
+  for (const m of mon) {
+    const p = byId[m.id];
+    p.live = { n: m.n, avg: m.avg, promise: m.promise, verdict: m.verdict, at: Date.now() };
+    const rid = `revert-${m.id}`;
+    if (m.verdict === 'weak' && !byId[rid]) {
+      byId[rid] = {
+        id: rid, aspect: 'مراجعة تعديل معتمد', status: 'new', by: 'rules', createdAt: Date.now(), target: m.id,
+        text: `تراجع عن التعديل: ${p.text}`,
+        why: `بعد الاعتماد طلعت ${m.n} إشارة حية بمتوسط ${m.avg.toFixed(2)}R بعد العمولة (±${m.se.toFixed(2)})، والمختبر كان وعد بـ${m.promise.toFixed(2)}R`,
+        effect: 'يرجع هذا النمط في هذا الشكل من السوق لإعداده السابق. غيره ما يتغير',
+      };
+    } else if (m.verdict === 'ok' && byId[rid] && byId[rid].status === 'new') {
+      byId[rid].status = 'expired'; byId[rid].expiredAt = Date.now();
+    }
+  }
+  return Object.values(byId);
+}
+
+// Approving "revert-<id>" retires the approved proposal it points to, so the engine stops applying it.
+export function applyReverts(props) {
+  for (const r of props) {
+    if (r.status !== 'approved' || !String(r.id).startsWith('revert-')) continue;
+    const t = props.find((p) => p.id === r.target);
+    if (t && t.status === 'approved') { t.status = 'reverted'; t.revertedAt = Date.now(); }
+  }
+  return props;
+}
+
 export async function runAnalyst(day) {
   const base = rulesReport(day);
   const res = await claudeReport(day, base);
@@ -456,7 +526,7 @@ export async function runAnalyst(day) {
   }
   // A rule-based proposal that the rules no longer support expires instead of waiting forever.
   if (weekly) for (const p of Object.values(byId)) if (p.status === 'new' && p.by !== 'claude' && !fresh.has(p.id)) { p.status = 'expired'; p.expiredAt = Date.now(); }
-  const proposals = Object.values(byId).slice(-40);
+  const proposals = applyReverts(applyMonitor(Object.values(byId))).slice(-40);
   writeJSON('proposals.json', proposals);
   const report = { ...base, kind: weekly ? 'weekly' : 'daily', bullets: ai ? [...ai.bullets] : base.bullets, source: ai ? 'claude' : 'rules', ...(res && res.error ? { claudeError: res.error } : {}) };
   const led = errorsLedger();

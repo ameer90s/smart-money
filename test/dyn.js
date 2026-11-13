@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-dyn-'));
 process.env.DATA_DIR = dir;
 const write = (rel, obj) => { fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); fs.writeFileSync(path.join(dir, rel), JSON.stringify(obj)); };
-const { dynProposals, dynFor, extProposals, extFor, confirmProposals, confirmFor } = await import('../engine/analyst.js');
+const { dynProposals, dynFor, extProposals, extFor, confirmProposals, confirmFor, monitorApproved, applyMonitor, applyReverts } = await import('../engine/analyst.js');
 const { plan } = await import('../engine/planner.js');
 const { DEFAULTS, DYN_STOPS, DYN_TARGETS } = await import('../engine/config.js');
 let n = 0;
@@ -94,5 +94,37 @@ t('confirm: only approved waits are looked up', () => {
   write('proposals.json', [{ id: 'confirm-FLAG-choppy-m2', status: 'approved' }]);
   assert.equal(confirmFor('FLAG', 'choppy').sec, 120);
   assert.equal(confirmFor('FLAG', 'range'), null);
+});
+
+// ---- monitoring after approval
+const id = 'dyn-VWAP-range-s1_5-k1_5';
+const sg = (r, tag = id) => ({ accepted: true, dyn: tag, sim: { r }, plan: { costR: 0.1 } });
+write('proposals.json', [{ id, status: 'approved', text: 'x', decidedAt: Date.parse('2026-11-02T08:00:00Z'), expect: 0.3 }]);
+write('days/2026-11-01/signals.json', Array.from({ length: 40 }, () => sg(-1))); // before approval: ignored
+write('days/2026-11-03/signals.json', [...Array.from({ length: 10 }, () => sg(1)), sg(5, 'other')]);
+t('monitor: collecting until enough live signals, other proposals and pre-approval days ignored', () => {
+  const m = monitorApproved();
+  assert.equal(m[0].n, 10); assert.equal(m[0].verdict, 'collecting');
+});
+write('days/2026-11-04/signals.json', Array.from({ length: 25 }, (_, i) => sg(i % 2 ? -1 : 0.2)));
+t('monitor: weak live result raises a revert proposal; approving it retires the original', () => {
+  const m = monitorApproved();
+  assert.equal(m[0].n, 35); assert.equal(m[0].verdict, 'weak', JSON.stringify(m));
+  const props = applyMonitor();
+  const rev = props.find((p) => p.id === `revert-${id}`);
+  assert.ok(rev && rev.status === 'new' && rev.target === id);
+  assert.equal(props.find((p) => p.id === id).live.verdict, 'weak');
+  rev.status = 'approved';
+  applyReverts(props);
+  assert.equal(props.find((p) => p.id === id).status, 'reverted');
+  write('proposals.json', props);
+  assert.equal(dynFor('VWAP', 'range'), null);
+});
+t('monitor: a good live result stays ok and raises nothing', () => {
+  write('proposals.json', [{ id, status: 'approved', text: 'x', decidedAt: Date.parse('2026-11-02T08:00:00Z'), expect: 0.3 }]);
+  write('days/2026-11-04/signals.json', Array.from({ length: 25 }, () => sg(0.9)));
+  const props = applyMonitor();
+  assert.equal(props.find((p) => p.id === id).live.verdict, 'ok');
+  assert.ok(!props.some((p) => p.id.startsWith('revert-')));
 });
 console.log(`${n} checks`);
