@@ -22,6 +22,9 @@ export function plan(setup, ctx, q, cfg, feats = {}) {
   const minAtr = (cfg.stopAtrMinBy && cfg.stopAtrMinBy[setup.type]) || cfg.stopAtrMin;
   const minR = Math.max(minAtr * a, 2 * spread, entry * 0.0025);
   if (R < minR) { R = minR; stop = entry - R; }
+  // An approved dynamic stop (dyn-* proposal) replaces the structural distance with a fixed number of ATRs.
+  const fixedAtr = cfg.stopFixedAtr && cfg.stopFixedAtr[setup.type];
+  if (fixedAtr) { R = Math.max(fixedAtr * a, 2 * spread, entry * 0.0025); stop = entry - R; }
   if (R > cfg.stopAtrMax * a) fails.push('stop');            // structure too far away
   if (spread / entry * 100 > cfg.spreadMaxPct || spread / R > cfg.spreadMaxR) fails.push('spread');
   if (setup.ext > cfg.extMaxAtr5) fails.push('ext');

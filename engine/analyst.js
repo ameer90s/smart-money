@@ -1,10 +1,11 @@
 // Daily analyst: classifies why trades lost, finds missed opportunities, and proposes changes
 // in any area (discovery, entry, stop, targets, timing, setups) with a what-if from recorded
 // signals. Rule-based by default; adds a written report from Claude when a key is configured.
-import { ENV, DEFAULTS, EXIT_FAMILIES, EXIT_FAMILY_AR, STATE_NAMES_AR } from './config.js';
+import { ENV, DEFAULTS, EXIT_FAMILIES, EXIT_FAMILY_AR, STATE_NAMES_AR, DYN_STOPS, DYN_TARGETS } from './config.js';
 import { request } from './http.js';
 import { readJSON, writeJSON, dayRel, listDays } from './store.js';
 import * as model from './model.js';
+import { STATES } from './regime.js';
 import { warn } from './log.js';
 
 const CAUSE_AR = { noise: 'وقف داخل ضجيج السهم', ext: 'دخول ممتد بعد دفعة', market: 'السوق انعكس', late: 'اكتشاف متأخر', spread: 'سيولة أو سبريد', time: 'لم يتحرك (خروج بالوقت)', other: 'أخرى' };
@@ -122,6 +123,7 @@ export function rulesReport(day) {
   for (const [k, xs] of Object.entries(byTod)) if (xs.length >= 10 && avgR(xs) < -0.2) props.push({ id: `tod-${k}`, aspect: 'التوقيت', text: `شدّد الشروط في ${TOD_AR[k]}`, why: `إشارات ${TOD_AR[k]} متوسطها ${avgR(xs).toFixed(2)}R على ${cn(xs.length, 'إشارات', 'إشارة')}، يعني خاسرة بالمتوسط`, effect: `توصيات أقل في ${TOD_AR[k]}، وتبقى بس الإشارات الأقوى` });
 
   props.push(...tuneProposals());
+  props.push(...dynProposals());
   return { day, at: Date.now(), source: 'rules', bullets, causes: causeList, proposals: props, losers: losers.length, filters: filterCompare(sig), filtersWeek: filterCompare(weekSig(day)) };
 }
 
@@ -225,6 +227,69 @@ export function tuneProposals(opts = {}) {
     });
   }
   return out.sort((a, b) => b.gain - a.gain).slice(0, 6);
+}
+
+// Dynamic stop and target per (setup, market state): the (stop in ATRs, target in R) pair from the lab grid that did
+// best, net of costs, on the older sessions and still beats the current setting on the newer ones (out of sample).
+// Shrinkage: a cell's mean is pulled toward the pooled mean of its setup (weight n/(n+k)) so small cells cannot
+// win on noise. Bounds are the grid itself. Proposals only; the user approves each.
+export function dynProposals(opts = {}) {
+  const { minTrain = 40, minTest = 20, margin = 0.05, shrinkK = 30 } = opts;
+  const lab = readJSON('lab/trades-latest.json', null);
+  if (!lab || !Array.isArray(lab.rows) || !lab.testFrom) return [];
+  const cap = DEFAULTS.capital, fee = 2 * DEFAULTS.feePerSide;
+  const net = (r, si, ki) => {
+    const sa = DYN_STOPS[si], Rg = sa * r.a5;
+    if (!(Rg > 0) || !r.e) return null;
+    const cps = fee / Math.max(1, cap / r.e) + (r.sp || 0.01);
+    return r.g[si][ki] - cps / Rg;
+  };
+  const ok = (r) => Array.isArray(r.g) && r.g.length === DYN_STOPS.length && r.a5 > 0;
+  const rowsBy = {};
+  for (const r of lab.rows) if (ok(r) && r.ty && r.st) (rowsBy[r.ty] = rowsBy[r.ty] || []).push(r);
+  const out = [];
+  for (const [ty, all] of Object.entries(rowsBy)) {
+    const pooled = (si, ki, rs) => { const v = rs.map((r) => net(r, si, ki)).filter((x) => x != null); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : 0; };
+    const trAll = all.filter((r) => r.d < lab.testFrom);
+    for (const st of STATES) {
+      const xs = all.filter((r) => r.st === st);
+      const tr = xs.filter((r) => r.d < lab.testFrom), te = xs.filter((r) => r.d >= lab.testFrom);
+      if (tr.length < minTrain || te.length < minTest) continue;
+      const shr = (si, ki) => { const n = tr.length; return (n * pooled(si, ki, tr) + shrinkK * pooled(si, ki, trAll)) / (n + shrinkK); };
+      const curS = DEFAULTS.stopFixedAtr && DEFAULTS.stopFixedAtr[ty] ? DYN_STOPS.indexOf(DEFAULTS.stopFixedAtr[ty]) : 2; // 1 ATR is the grid's reference
+      const fk = (DEFAULTS.fixedR || {})[ty];
+      const curK = fk ? DYN_TARGETS.indexOf(fk) : 1;
+      if (curS < 0 || curK < 0) continue;
+      let best = null;
+      for (let si = 0; si < DYN_STOPS.length; si++) for (let ki = 0; ki < DYN_TARGETS.length; ki++) {
+        const v = shr(si, ki);
+        if (!best || v > best.v) best = { si, ki, v };
+      }
+      if (best.si === curS && best.ki === curK) continue;
+      const gain = pooled(best.si, best.ki, te) - pooled(curS, curK, te);
+      if (gain < margin) continue;
+      const S = DYN_STOPS[best.si], K = DYN_TARGETS[best.ki];
+      out.push({
+        id: `dyn-${ty}-${st}-s${String(S).replace('.', '_')}-k${String(K).replace('.', '_')}`, aspect: 'وقف وهدف ديناميكي',
+        text: `في سوق «${STATE_NAMES_AR[st] || st}» خلّ وقف ${ty} ${S} ATR وهدفه ${K}R`,
+        why: `الأفضل على الجلسات القديمة (${tr.length} صفقة): ${pooled(best.si, best.ki, tr).toFixed(2)}R. وعلى الأحدث (${te.length} صفقة، خارج العينة): ${pooled(best.si, best.ki, te).toFixed(2)}R مقابل ${pooled(curS, curK, te).toFixed(2)}R للإعداد الحالي، بعد العمولة`,
+        effect: `${ty} في هذا الشكل من السوق يستخدم وقف ${S} ATR وهدف ${K}R بدل الإعداد الحالي. غيره ما يتغير`,
+        by: 'rules', gain: +gain.toFixed(3),
+      });
+    }
+  }
+  return out.sort((a, b) => b.gain - a.gain).slice(0, 6);
+}
+
+// The approved dynamic proposal (dyn-<SETUP>-<state>-s<stop>-k<target>) for this setup in this market state, if any.
+export function dynFor(setupType, state) {
+  if (!state) return null;
+  for (const p of readJSON('proposals.json', [])) {
+    if (p.status !== 'approved') continue;
+    const m = /^dyn-([A-Z0-9]+)-(trendUp|trendDown|range|choppy)-s(\d+(?:_\d+)?)-k(\d+(?:_\d+)?)$/.exec(String(p.id));
+    if (m && m[1] === setupType && m[2] === state) return { id: p.id, stopAtr: +m[3].replace('_', '.'), k: +m[4].replace('_', '.') };
+  }
+  return null;
 }
 
 // The approved tuning proposal (tune-<SETUP>-<state>-<exit>) for this setup in this market state, if any.

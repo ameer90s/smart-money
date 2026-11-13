@@ -3,6 +3,7 @@
 // spread, separately on older sessions (train) and the most recent ones (test). A variant is
 // only worth adopting if it holds up on both. Writes lab/latest.json; never touches the model.
 import { alpaca } from './alpaca.js';
+import { DYN_STOPS, DYN_TARGETS } from './config.js';
 import { isoNy, nyToUtc, addDays, ny, hmToMin, minToHm } from './clock.js';
 import { buildCtx, detect } from './setups.js';
 import { plan as makePlan } from './planner.js';
@@ -21,6 +22,7 @@ const SCAN_STEP_MIN = 5;
 const CHUNK = 100;
 const IN_PLAY = 50; // a stock is kept for the day once its live score reaches this
 const EXITS = { mgmt: null, r1: 1, r15: 1.5, r2: 2 };
+// Grid for the dynamic stop/target search: stop distance in 5-minute ATRs x target in R multiples.
 
 export const FAMILIES = {
   base: 'الأنماط الحالية كما هي',
@@ -196,6 +198,8 @@ async function labDay(sess, env) {
           // re-filter offline: plan stop and two wider stops, each with fixed 1R/1.5R/2R exits.
           used.add(`row|${s0.type}`);
           const wide = (Rw) => ({ R: +Rw.toFixed(4), r1: +simFixed(bars, fillAt, p.entry, p.entry - Rw, p.entry + Rw, cfg.timeStopMin, flatMs).toFixed(3), r15: +simFixed(bars, fillAt, p.entry, p.entry - Rw, p.entry + 1.5 * Rw, cfg.timeStopMin, flatMs).toFixed(3), r2: +simFixed(bars, fillAt, p.entry, p.entry - Rw, p.entry + 2 * Rw, cfg.timeStopMin, flatMs).toFixed(3) });
+          // Gross R of every (stop, target) pair, fixed stop distance s*ATR, single target k*R, same time stop.
+          const grid = () => DYN_STOPS.map((sa) => DYN_TARGETS.map((k) => { const Rg = sa * ctx.a5; return +simFixed(bars, fillAt, p.entry, p.entry - Rg, p.entry + k * Rg, cfg.timeStopMin, flatMs).toFixed(3); }));
           env.rows.push({
             d: day, s, ty: s0.type, fams: c.fams, w: inWatch ? 1 : 0, e: p.entry, R: +p.R.toFixed(4), sp: p.spread, a5: +ctx.a5.toFixed(4),
             ext: +s0.ext.toFixed(2), chg: +((ctx.last.c / dc.pc - 1) * 100).toFixed(2), rv: rvol == null ? null : +rvol.toFixed(2), sc, ma: Math.round(ctx.minAfterOpen), rg: regime, st: mstate,
@@ -203,6 +207,7 @@ async function labDay(sess, env) {
             et: +(ny(fillAt).min / 60).toFixed(2), xr: mgReason, // entry time (NY hour) and how the managed exit ended
             x: Object.fromEntries(Object.entries(out).map(([k, v]) => [k, +v.toFixed(3)])),
             w1: wide(Math.max(p.R, ctx.a5)), w2: wide(Math.max(p.R, 0.01 * p.entry)),
+            g: grid(),
           });
         }
         if (!todo.length || fails.length) continue;

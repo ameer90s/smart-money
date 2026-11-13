@@ -102,3 +102,7 @@ export const ENV = {
   untilNy: env.UNTIL_NY || '',               // stop at this NY time (HH:MM), empty = never
   reasonFile: env.REASON_FILE || '',
 };
+
+// Grid searched for the dynamic stop (5-minute ATRs) and target (R multiples); also the bounds of any proposal.
+export const DYN_STOPS = [0.5, 0.75, 1, 1.5, 2];
+export const DYN_TARGETS = [1, 1.5, 2];
