@@ -47,7 +47,7 @@ try {
   for (const s of ['ORBT', 'SUNQ']) fs.writeFileSync(path.join(dir, 'shariah.json'), JSON.stringify({ ...JSON.parse(fs.readFileSync(path.join(dir, 'shariah.json'), 'utf8')), [s]: { st: 'ok', at } }));
   let first = 0;
   await t('walk-forward replay: live funnel, no hindsight, retires old samples', async () => {
-    first = await bootstrap(universe, DEFAULTS, { days: 5, budgetMs: 120000, minReplay: 1 });
+    first = await bootstrap(universe, DEFAULTS, { days: 60, budgetMs: 120000, minReplay: 1 });
     assert.ok(model.wasReplayed('2026-10-28', '*2'));
     const S = model.load().samples;
     const rep = S.filter((s) => s.src === 'replay');
@@ -62,7 +62,7 @@ try {
   await t('a second replay is incremental: no new requests, no new samples', async () => {
     const before = await feeds();
     const size = model.load().samples.length;
-    const second = await bootstrap(universe, DEFAULTS, { days: 5, budgetMs: 120000, minReplay: 1 });
+    const second = await bootstrap(universe, DEFAULTS, { days: 60, budgetMs: 120000, minReplay: 1 });
     const after = await feeds();
     assert.equal(second, 0);
     assert.equal(model.load().samples.length, size);

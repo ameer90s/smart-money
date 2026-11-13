@@ -1,7 +1,7 @@
 // Daily analyst: classifies why trades lost, finds missed opportunities, and proposes changes
 // in any area (discovery, entry, stop, targets, timing, setups) with a what-if from recorded
 // signals. Rule-based by default; adds a written report from Claude when a key is configured.
-import { ENV, DEFAULTS, EXIT_FAMILIES, EXIT_FAMILY_AR, STATE_NAMES_AR, DYN_STOPS, DYN_TARGETS } from './config.js';
+import { ENV, DEFAULTS, EXIT_FAMILIES, EXIT_FAMILY_AR, STATE_NAMES_AR, DYN_STOPS, DYN_TARGETS, DYN_CONFIRM } from './config.js';
 import { request } from './http.js';
 import { readJSON, writeJSON, dayRel, listDays } from './store.js';
 import * as model from './model.js';
@@ -125,6 +125,7 @@ export function rulesReport(day) {
   props.push(...tuneProposals());
   props.push(...dynProposals());
   props.push(...extProposals());
+  props.push(...confirmProposals());
   return { day, at: Date.now(), source: 'rules', bullets, causes: causeList, proposals: props, losers: losers.length, filters: filterCompare(sig), filtersWeek: filterCompare(weekSig(day)) };
 }
 
@@ -337,6 +338,59 @@ export function extFor(setupType, state) {
     if (p.status !== 'approved') continue;
     const m = /^ext-([A-Z0-9]+)-(trendUp|trendDown|range|choppy)-c(\d+(?:_\d+)?)$/.exec(String(p.id));
     if (m && m[1] === setupType && m[2] === state) return { id: p.id, cap: +m[3].replace('_', '.') };
+  }
+  return null;
+}
+
+// Dynamic confirmation per (setup, market state): how many minutes the price must keep closing above the trigger before
+// entering. Compared on every signal (a signal that fails the hold is skipped and counts as 0R), so a longer wait only
+// wins when the trades it filters out were worse than the entry price it costs. Older sessions pick, newer ones verify.
+export function confirmProposals(opts = {}) {
+  const { minTrain = 40, minTest = 20, margin = 0.05 } = opts;
+  const lab = readJSON('lab/trades-latest.json', null);
+  if (!lab || !Array.isArray(lab.rows) || !lab.testFrom) return [];
+  const cap = DEFAULTS.capital, fee = 2 * DEFAULTS.feePerSide;
+  const net = (r, di) => {
+    const c = r.cf[di];
+    if (!c) return 0;
+    const [g, R, e] = c;
+    return R > 0 ? g - (fee / Math.max(1, cap / e) + (r.sp || 0.01)) / R : 0;
+  };
+  const mean = (xs, di) => (xs.length ? xs.reduce((a, r) => a + net(r, di), 0) / xs.length : 0);
+  const cells = {};
+  for (const r of lab.rows) if (r.ty && r.st && Array.isArray(r.cf) && r.cf.length === DYN_CONFIRM.length && r.cf[0]) (cells[`${r.ty}|${r.st}`] = cells[`${r.ty}|${r.st}`] || []).push(r);
+  const out = [];
+  for (const [key, xs] of Object.entries(cells)) {
+    const [ty, st] = key.split('|');
+    const tr = xs.filter((r) => r.d < lab.testFrom), te = xs.filter((r) => r.d >= lab.testFrom);
+    if (tr.length < minTrain || te.length < minTest) continue;
+    let best = null;
+    for (let di = 1; di < DYN_CONFIRM.length; di++) {
+      const gtr = mean(tr, di) - mean(tr, 0), gte = mean(te, di) - mean(te, 0);
+      if (gtr < margin || gte < margin) continue;
+      if (!best || gte > best.gte) best = { di, gtr, gte };
+    }
+    if (!best) continue;
+    const m = DYN_CONFIRM[best.di];
+    const kept = tr.filter((r) => r.cf[best.di]).length;
+    out.push({
+      id: `confirm-${ty}-${st}-m${m}`, aspect: 'تأكيد الدخول الديناميكي',
+      text: `في سوق «${STATE_NAMES_AR[st] || st}» انتظر ${m} دقيقة فوق نقطة الدخول قبل توصية ${ty}`,
+      why: `الانتظار يرفع المتوسط ${best.gtr.toFixed(2)}R على الجلسات القديمة (يثبت ${kept} من ${tr.length}) و${best.gte.toFixed(2)}R على الأحدث خارج العينة (${te.length} صفقة)، بعد العمولة، مع احتساب الإشارات اللي سقطت كصفر`,
+      effect: `${ty} في هذا الشكل من السوق ما يطلع توصية إلا بعد ما يثبت السعر ${m} دقيقة فوق الدخول. غيره ما يتغير`,
+      by: 'rules', gain: +best.gte.toFixed(3),
+    });
+  }
+  return out.sort((a, b) => b.gain - a.gain).slice(0, 6);
+}
+
+// The approved confirmation (confirm-<SETUP>-<state>-m<minutes>) for this setup in this market state, if any.
+export function confirmFor(setupType, state) {
+  if (!state) return null;
+  for (const p of readJSON('proposals.json', [])) {
+    if (p.status !== 'approved') continue;
+    const m = /^confirm-([A-Z0-9]+)-(trendUp|trendDown|range|choppy)-m(\d+)$/.exec(String(p.id));
+    if (m && m[1] === setupType && m[2] === state) return { id: p.id, sec: +m[3] * 60 };
   }
   return null;
 }

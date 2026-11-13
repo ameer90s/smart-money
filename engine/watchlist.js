@@ -204,7 +204,7 @@ export class Watchlist {
       const R = s.trigger - s.stopStruct;
       if (p >= s.trigger && p <= s.trigger + 0.25 * R) {
         if (!it.cross[s.type]) it.cross[s.type] = t;
-        else if (t - it.cross[s.type] >= cfg.confirmSec * 1000) {
+        else if (t - it.cross[s.type] >= ((this.confirmFor && this.confirmFor(s.type)) ?? cfg.confirmSec) * 1000) {
           it.fired.add(s.type);
           delete it.cross[s.type];
           this.onSignal(it, s);

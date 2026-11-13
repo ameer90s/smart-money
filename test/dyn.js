@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-dyn-'));
 process.env.DATA_DIR = dir;
 const write = (rel, obj) => { fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); fs.writeFileSync(path.join(dir, rel), JSON.stringify(obj)); };
-const { dynProposals, dynFor, extProposals, extFor } = await import('../engine/analyst.js');
+const { dynProposals, dynFor, extProposals, extFor, confirmProposals, confirmFor } = await import('../engine/analyst.js');
 const { plan } = await import('../engine/planner.js');
 const { DEFAULTS, DYN_STOPS, DYN_TARGETS } = await import('../engine/config.js');
 let n = 0;
@@ -73,5 +73,26 @@ t('ext: only approved caps are looked up', () => {
   write('proposals.json', [{ id: 'ext-EMA-range-c1', status: 'approved' }]);
   assert.equal(extFor('EMA', 'range').cap, 1);
   assert.equal(extFor('EMA', 'choppy'), null);
+});
+
+// confirmation: waiting 2 minutes drops the losers (they fall back below the trigger) and costs little
+const cr = [];
+const mkC = (ty, st, d, win) => cr.push({ ty, st, d, e: 20, sp: 0.02, R: 0.2, cf: [[win ? 0.6 : -1, 0.2, 20], win ? [0.5, 0.2, 20.02] : null, win ? [0.5, 0.2, 20.02] : null, win ? [0.4, 0.2, 20.04] : null, win ? [0.3, 0.2, 20.1] : null] });
+for (let i = 0; i < 80; i++) mkC('FLAG', 'choppy', `2026-08-${String(1 + (i % 20)).padStart(2, '0')}`, i % 3 === 0);
+for (let i = 0; i < 40; i++) mkC('FLAG', 'choppy', `2026-10-${String(1 + (i % 20)).padStart(2, '0')}`, i % 3 === 0);
+for (let i = 0; i < 80; i++) mkC('VWAP', 'range', `2026-08-${String(1 + (i % 20)).padStart(2, '0')}`, true);
+for (let i = 0; i < 40; i++) mkC('VWAP', 'range', `2026-10-${String(1 + (i % 20)).padStart(2, '0')}`, true);
+write('lab/trades-latest.json', { at: 1, testFrom: '2026-09-22', rows: cr });
+t('confirm: proposes a wait only when it filters losers in both samples', () => {
+  const ids = confirmProposals().map((x) => x.id);
+  assert.ok(ids.includes('confirm-FLAG-choppy-m1'), ids.join());
+  assert.ok(!ids.some((i) => i.startsWith('confirm-VWAP')), ids.join());
+});
+t('confirm: only approved waits are looked up', () => {
+  write('proposals.json', [{ id: 'confirm-FLAG-choppy-m2', status: 'pending' }]);
+  assert.equal(confirmFor('FLAG', 'choppy'), null);
+  write('proposals.json', [{ id: 'confirm-FLAG-choppy-m2', status: 'approved' }]);
+  assert.equal(confirmFor('FLAG', 'choppy').sec, 120);
+  assert.equal(confirmFor('FLAG', 'range'), null);
 });
 console.log(`${n} checks`);

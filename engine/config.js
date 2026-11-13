@@ -106,3 +106,5 @@ export const ENV = {
 // Grid searched for the dynamic stop (5-minute ATRs) and target (R multiples); also the bounds of any proposal.
 export const DYN_STOPS = [0.5, 0.75, 1, 1.5, 2];
 export const DYN_TARGETS = [1, 1.5, 2];
+// Confirmation delays (minutes the price must hold above the trigger) searched by the lab; also the bounds of any proposal.
+export const DYN_CONFIRM = [0, 1, 2, 3, 5];

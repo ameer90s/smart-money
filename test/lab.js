@@ -24,7 +24,7 @@ try {
   const { runLab } = await import('../engine/lab.js');
   const { DEFAULTS } = await import('../engine/config.js');
   const universe = { symbols: ['NOVX', 'HLXA', 'KRNA', 'ORBT', 'SUNQ', 'BANKX'].map((s, i) => ({ s, adv: [5e7, 3e7, 2e7, 4e7, 2e7, 9e7][i] })) };
-  const out = await runLab(universe, DEFAULTS, { days: 5, testDays: 1 });
+  const out = await runLab(universe, DEFAULTS, { days: 60, testDays: 1 });
 
   await t('lab replays the session and writes results', () => {
     assert.equal(out.done, 1);
@@ -44,6 +44,14 @@ try {
   });
   await t('the lab never changes the live model', () => {
     assert.equal(fs.readFileSync(path.join(dir, 'model.json'), 'utf8'), modelBefore);
+  });
+  await t('lab rows carry the stop/target grid and the confirmation delays', () => {
+    const f = path.join(dir, 'lab/trades-latest.json');
+    const rows = JSON.parse(fs.readFileSync(f, 'utf8')).rows;
+    assert.ok(rows.length > 0);
+    const r = rows[0];
+    assert.equal(r.g.length, 5); assert.equal(r.g[0].length, 3);
+    assert.equal(r.cf.length, 5); assert.ok(r.cf[0] === null || r.cf[0].length === 3);
   });
   console.log(out.variants.slice(0, 8).map((v) => `${v.key}: n=${v.all.n} net=${v.all.avgNet}`).join('\n'));
 } finally {

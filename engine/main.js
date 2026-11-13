@@ -22,7 +22,7 @@ import { auditDay } from './audit.js';
 import { bootstrap } from './backtest.js';
 import { runLab } from './lab.js';
 import { matchProfile, profilesSummary } from './profiles.js';
-import { runAnalyst, CAUSE_AR, FAIL_AR, tuneFor, dynFor, extFor } from './analyst.js';
+import { runAnalyst, CAUSE_AR, FAIL_AR, tuneFor, dynFor, extFor, confirmFor } from './analyst.js';
 import { finnhub } from './finnhub.js';
 import * as model from './model.js';
 import * as live from './live.js';
@@ -290,6 +290,17 @@ async function runDay(day, sess) {
     } catch (e) { warn('onSignal', e); }
   };
   const wl = new Watchlist({ cfg, stream, today: day, openMs, onSignal, onEvent });
+  // Approved dynamic confirmation (seconds the price must hold above the trigger) for the setup in the current market state; cached for a minute.
+  const confCache = new Map();
+  wl.confirmFor = (type) => {
+    const st = (rt.mkt && rt.mkt.state) || null;
+    const k = `${type}|${st}`, c = confCache.get(k);
+    if (c && Date.now() - c.at < 60000) return c.sec;
+    const f = confirmFor(type, st);
+    const sec = f ? f.sec : null;
+    confCache.set(k, { at: Date.now(), sec });
+    return sec;
+  };
   rt.wl = wl;
 
   // Pre-market: opening candidates and the morning brief.

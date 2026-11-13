@@ -3,7 +3,7 @@
 // spread, separately on older sessions (train) and the most recent ones (test). A variant is
 // only worth adopting if it holds up on both. Writes lab/latest.json; never touches the model.
 import { alpaca } from './alpaca.js';
-import { DYN_STOPS, DYN_TARGETS } from './config.js';
+import { DYN_STOPS, DYN_TARGETS, DYN_CONFIRM } from './config.js';
 import { isoNy, nyToUtc, addDays, ny, hmToMin, minToHm } from './clock.js';
 import { buildCtx, detect } from './setups.js';
 import { plan as makePlan } from './planner.js';
@@ -200,6 +200,21 @@ async function labDay(sess, env) {
           const wide = (Rw) => ({ R: +Rw.toFixed(4), r1: +simFixed(bars, fillAt, p.entry, p.entry - Rw, p.entry + Rw, cfg.timeStopMin, flatMs).toFixed(3), r15: +simFixed(bars, fillAt, p.entry, p.entry - Rw, p.entry + 1.5 * Rw, cfg.timeStopMin, flatMs).toFixed(3), r2: +simFixed(bars, fillAt, p.entry, p.entry - Rw, p.entry + 2 * Rw, cfg.timeStopMin, flatMs).toFixed(3) });
           // Gross R of every (stop, target) pair, fixed stop distance s*ATR, single target k*R, same time stop.
           const grid = () => DYN_STOPS.map((sa) => DYN_TARGETS.map((k) => { const Rg = sa * ctx.a5; return +simFixed(bars, fillAt, p.entry, p.entry - Rg, p.entry + k * Rg, cfg.timeStopMin, flatMs).toFixed(3); }));
+          // Delayed entry: the price must close at or above the trigger on every bar for d minutes after the fill, then
+          // we enter at the next open (if not already too extended). Fixed 1.5R target, same structural stop.
+          const confirm = () => DYN_CONFIRM.map((dm) => {
+            const t0 = fillAt + dm * 60000;
+            let held = true, entry2 = null;
+            for (const b of bars) {
+              const bt = ms(b.t);
+              if (bt < fillAt) continue;
+              if (bt < t0) { if (b.c < s0.trigger || b.l <= p.stop) { held = false; break; } continue; }
+              entry2 = b.o; break;
+            }
+            if (!held || entry2 == null || entry2 > s0.trigger + 0.25 * R0 || entry2 <= p.stop) return null;
+            const R2 = entry2 - p.stop;
+            return [+simFixed(bars, t0, entry2, p.stop, entry2 + 1.5 * R2, cfg.timeStopMin, flatMs).toFixed(3), +R2.toFixed(4), +entry2.toFixed(4)];
+          });
           env.rows.push({
             d: day, s, ty: s0.type, fams: c.fams, w: inWatch ? 1 : 0, e: p.entry, R: +p.R.toFixed(4), sp: p.spread, a5: +ctx.a5.toFixed(4),
             ext: +s0.ext.toFixed(2), chg: +((ctx.last.c / dc.pc - 1) * 100).toFixed(2), rv: rvol == null ? null : +rvol.toFixed(2), sc, ma: Math.round(ctx.minAfterOpen), rg: regime, st: mstate,
@@ -208,6 +223,7 @@ async function labDay(sess, env) {
             x: Object.fromEntries(Object.entries(out).map(([k, v]) => [k, +v.toFixed(3)])),
             w1: wide(Math.max(p.R, ctx.a5)), w2: wide(Math.max(p.R, 0.01 * p.entry)),
             g: grid(),
+            cf: confirm(),
           });
         }
         if (!todo.length || fails.length) continue;
