@@ -207,7 +207,9 @@ export function tuneProposals(opts = {}) {
     if (!r.st || !r.x || !r.ty) continue;
     (cells[`${r.ty}|${r.st}`] = cells[`${r.ty}|${r.st}`] || []).push(r);
   }
-  const mean = (xs, f) => xs.reduce((a, r) => a + r.x[f], 0) / xs.length;
+  // lab exit results are gross R; take off fees and spread (in R of this row's own stop) so every figure is net
+  const costR = (r) => (r.R > 0 && r.e ? (2 * DEFAULTS.feePerSide / Math.max(1, DEFAULTS.capital / r.e) + (r.sp || 0.01)) / r.R : 0);
+  const mean = (xs, f) => xs.reduce((a, r) => a + r.x[f] - costR(r), 0) / xs.length;
   const out = [];
   for (const [key, xs] of Object.entries(cells)) {
     const [ty, st] = key.split('|');
@@ -219,13 +221,13 @@ export function tuneProposals(opts = {}) {
     const best = fams.slice().sort((a, b) => mean(tr, b) - mean(tr, a))[0];
     if (best === cur) continue;
     const gain = mean(te, best) - mean(te, cur);
-    if (gain < margin) continue;
+    if (gain < margin || mean(te, best) <= 0) continue; // must also make money net of costs, not just lose less
     out.push({
       id: `tune-${ty}-${st}-${best}`, aspect: 'النمط وشكل السوق',
       text: `في سوق «${STATE_NAMES_AR[st] || st}» غيّر خروج ${ty} من «${EXIT_FAMILY_AR[cur]}» إلى «${EXIT_FAMILY_AR[best]}»`,
       why: `الأفضل على الجلسات القديمة (${tr.length} صفقة): ${mean(tr, best).toFixed(2)}R مقابل ${mean(tr, cur).toFixed(2)}R. وعلى الجلسات الأحدث (${te.length} صفقة، خارج العينة): ${mean(te, best).toFixed(2)}R مقابل ${mean(te, cur).toFixed(2)}R بعد العمولة`,
       effect: `إذا انطبق، ${ty} في هذا الشكل من السوق يخرج بـ«${EXIT_FAMILY_AR[best]}». غيره ما يتغير، وتقدر ترجعه برفض الاقتراح`,
-      by: 'rules', gain: +gain.toFixed(3),
+      by: 'rules', gain: +gain.toFixed(3), expect: +mean(te, best).toFixed(3),
     });
   }
   return out.sort((a, b) => b.gain - a.gain).slice(0, 6);
@@ -269,7 +271,7 @@ export function dynProposals(opts = {}) {
       }
       if (best.si === curS && best.ki === curK) continue;
       const gain = pooled(best.si, best.ki, te) - pooled(curS, curK, te);
-      if (gain < margin) continue;
+      if (gain < margin || pooled(best.si, best.ki, te) <= 0) continue; // must make money net, not just lose less
       const S = DYN_STOPS[best.si], K = DYN_TARGETS[best.ki];
       out.push({
         id: `dyn-${ty}-${st}-s${String(S).replace('.', '_')}-k${String(K).replace('.', '_')}`, aspect: 'وقف وهدف ديناميكي',
@@ -316,7 +318,7 @@ export function extProposals(opts = {}) {
       const ktr = tr.filter((r) => r.ext <= c), kte = te.filter((r) => r.ext <= c);
       if (ktr.length < tr.length / 3 || kte.length < Math.max(8, te.length / 3)) continue;
       const gtr = mean(ktr) - mean(tr), gte = mean(kte) - mean(te);
-      if (gtr < margin || gte < margin) continue;
+      if (gtr < margin || gte < margin || mean(kte) <= 0) continue; // must make money net, not just lose less
       if (!best || gte > best.gte) best = { c, gtr, gte, ntr: ktr.length, nte: kte.length };
     }
     if (!best) continue;
@@ -367,7 +369,10 @@ export function confirmProposals(opts = {}) {
     let best = null;
     for (let di = 1; di < DYN_CONFIRM.length; di++) {
       const gtr = mean(tr, di) - mean(tr, 0), gte = mean(te, di) - mean(te, 0);
-      if (gtr < margin || gte < margin) continue;
+      const keptTr = tr.filter((r) => r.cf[di]).length, keptTe = te.filter((r) => r.cf[di]).length;
+      // skipping almost everything is not an edge: keep at least a third of the signals and make money net
+      if (keptTr < tr.length / 3 || keptTe < Math.max(8, te.length / 3)) continue;
+      if (gtr < margin || gte < margin || mean(te, di) <= 0) continue;
       if (!best || gte > best.gte) best = { di, gtr, gte };
     }
     if (!best) continue;
