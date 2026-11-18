@@ -1,1 +1,1 @@
-[{"sym":"MP","type":"DIP","trigger":36.38,"stop":36.2397,"inplay":false,"t":1795020120180,"until":1795020300180,"outcome":"fired","endAt":1795020127311,"price":36.395}]
+[{"sym":"MP","type":"DIP","trigger":36.38,"stop":36.2397,"inplay":false,"t":1795020120180,"until":1795020300180,"outcome":"fired","endAt":1795020127311,"price":36.395},{"sym":"SLS","type":"DIP","trigger":19.1,"stop":18.995,"inplay":true,"t":1795028160126,"until":1795028340126,"outcome":"fired","endAt":1795028164170,"price":19.105}]
