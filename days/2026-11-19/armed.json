@@ -1,0 +1,1 @@
+[{"sym":"MSTR","type":"DIP","trigger":90.59,"stop":90.0937,"inplay":true,"t":1795101720231,"until":1795101900231,"outcome":"expired","endAt":1795101901184,"price":null},{"sym":"MSTR","type":"DIP","trigger":90.44,"stop":89.9358,"inplay":true,"t":1795102080150,"until":1795102260150,"outcome":"fired","endAt":1795102128132,"price":90.45}]
