@@ -3,6 +3,7 @@
 // spread, separately on older sessions (train) and the most recent ones (test). A variant is
 // only worth adopting if it holds up on both. Writes lab/latest.json; never touches the model.
 import { alpaca } from './alpaca.js';
+import { swingStudy } from './swing.js';
 import { DYN_STOPS, DYN_TARGETS, DYN_CONFIRM } from './config.js';
 import { isoNy, nyToUtc, addDays, ny, hmToMin, minToHm } from './clock.js';
 import { buildCtx, detect } from './setups.js';
@@ -411,6 +412,7 @@ export async function runLab(universe, cfg, { days = 90, testDays = 30, budgetMs
   };
   writeJSON('lab/latest.json', out);
   writeJSON('lab/trades-latest.json', { at: out.at, testFrom: out.testFrom, costs: out.costs, rows });
+  try { writeJSON('lab/swing-latest.json', { at: out.at, ...swingStudy(Object.fromEntries(syms.map((x) => [x, daily[x] || []])), { feePerSide: cfg.feePerSide, capital: cfg.capital }) }); } catch (e) { warn('swing', e); }
   writeJSON('lab/orbip-latest.json', { at: out.at, testFrom: out.testFrom, costs: out.costs, stops: IP_STOPS, rows: ipRows });
   writeJSON(`lab/${today}-${ny().hm.replace(':', '')}.json`, out);
   log(`lab: ${perDay.length} sessions, ${variants.length} variants in ${out.minutes} min`);
