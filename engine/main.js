@@ -21,6 +21,7 @@ import { buildWeek, loadWeek, dayRules, recordOutcomes } from './events.js';
 import { auditDay } from './audit.js';
 import { bootstrap } from './backtest.js';
 import { runLab } from './lab.js';
+import { archiveCatalysts, probeFinnhub } from './archive.js';
 import { matchProfile, profilesSummary } from './profiles.js';
 import { runAnalyst, CAUSE_AR, FAIL_AR, tuneFor, dynFor, extFor, confirmFor, applyReverts } from './analyst.js';
 import { finnhub } from './finnhub.js';
@@ -404,6 +405,7 @@ async function runDay(day, sess) {
     try { await auditDay(day, cfg); setFlag(`audit-${day}`); } catch (e) { warn('audit', e); }
     try { await runAnalyst(day); } catch (e) { warn('analyst', e); }
     try { await recordOutcomes(loadWeek(day)); } catch {}
+    try { await archiveCatalysts(day); } catch (e) { warn('archive', e); }
   }
   rt.phase = 'done';
   await publishLive(true);
@@ -438,6 +440,7 @@ async function main() {
   if (mode === 'maintenance') { await maintenance(ny().ymd); exitWith('done'); }
   if (mode === 'lab') { // research only: writes lab/latest.json, never touches the live model
     const u = loadUniverse();
+    try { await probeFinnhub(ny().ymd); } catch (e) { warn('probe', e); }
     if (u) { try { await runLab(u, cfg, { days: Number(process.env.LAB_DAYS || 90) }); } catch (e) { warn('lab', e); } }
     exitWith('done');
   }
