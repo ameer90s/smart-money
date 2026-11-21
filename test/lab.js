@@ -53,6 +53,28 @@ try {
     assert.equal(r.g.length, 5); assert.equal(r.g[0].length, 3);
     assert.equal(r.cf.length, 5); assert.ok(r.cf[0] === null || r.cf[0].length === 3);
   });
+  await t('lab rows record sweep features and what happens after the stop', () => {
+    const rows = JSON.parse(fs.readFileSync(path.join(dir, 'lab/trades-latest.json'), 'utf8')).rows;
+    for (const r of rows) {
+      assert.ok(r.sw && typeof r.sw === 'object');
+      assert.ok(r.aft === null || (r.aft.length === 3 && r.aft[0] >= 0));
+      assert.ok('lv' in r);
+    }
+    assert.ok(rows.some((r) => r.aft), 'at least one row hit its stop');
+  });
+  await t('sweepReclaim buys the first close back above a swept level, stop under the sweep low', async () => {
+    const { sweepReclaim } = await import('../engine/lab.js');
+    const bar = (o, h, l, c) => ({ o, h, l, c, v: 1000 });
+    const rth = Array.from({ length: 30 }, () => bar(10.2, 10.3, 10.1, 10.2));
+    rth[2] = bar(10.2, 10.3, 10.0, 10.2); // opening-range low 10.0
+    rth.push(bar(10.1, 10.15, 9.8, 9.9)); // sweeps below 10.0
+    rth.push(bar(9.9, 10.15, 9.85, 10.1)); // closes back above, green
+    const ctx = { rth, a5: 0.1, vwap: 10.1, last: rth[rth.length - 1] };
+    const st = sweepReclaim(ctx, { pdl: 0 });
+    assert.ok(st && st.type === 'SWEEP' && st.lvl === 'or15');
+    assert.ok(st.stopStruct < 9.8 && st.trigger > 10.15);
+    assert.equal(sweepReclaim({ ...ctx, rth: rth.slice(0, 30), last: rth[29] }, { pdl: 0 }), null);
+  });
   console.log(out.variants.slice(0, 8).map((v) => `${v.key}: n=${v.all.n} net=${v.all.avgNet}`).join('\n'));
 } finally {
   mock.kill();

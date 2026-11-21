@@ -32,6 +32,7 @@ export const FAMILIES = {
   vwappb: 'ارتداد من VWAP في سهم صاعد',
   dip: 'شراء الهبوط الحاد تحت VWAP بعد شمعة انعكاس',
   late: 'اختراق أعلى اليوم بعد 14:00',
+  sweep: 'سحب السيولة ثم استرداد المستوى (أدنى أمس أو قاع أول 15/30 دقيقة)',
 };
 export const EXIT_AR = { mgmt: 'الإدارة الحالية (نصف عند الهدف 1 ووقف على الدخول)', r1: 'هدف 1R', r15: 'هدف 1.5R', r2: 'هدف 2R' };
 export const FUNNEL_AR = { watch: 'وهو في قائمة المراقبة', inplay: 'من أول ما دخل القائمة لنهاية اليوم' };
@@ -73,6 +74,67 @@ export function lateHod(ctx, rvol) {
   if (ctx.minAfterOpen < 270 || !(rvol >= 1.5)) return null;
   if (ctx.last.c <= ctx.vwap || ctx.hod - ctx.last.c > 0.3 * ctx.a5) return null;
   return S('LATE', ctx.hod + 0.01, ctx.hod + 0.01 - ctx.a5, ctx);
+}
+
+
+// Liquidity levels a stop-hunt would target: yesterday's low and the low of the first 15 / 30 minutes.
+function levelsOf(ctx, dc) {
+  const out = [];
+  if (dc && dc.pdl > 0) out.push(['pdl', dc.pdl]);
+  if (ctx.rth.length >= 20) out.push(['or15', Math.min(...ctx.rth.slice(0, 15).map((b) => b.l))]);
+  if (ctx.rth.length >= 35) out.push(['or30', Math.min(...ctx.rth.slice(0, 30).map((b) => b.l))]);
+  return out;
+}
+
+// Buy the first close back above a level that was just swept (price pushed below it, then reclaimed).
+// Stop sits under the sweep low; the trigger is the high of the reclaim bar.
+export function sweepReclaim(ctx, dc) {
+  const { rth, a5, last } = ctx;
+  const n = rth.length;
+  if (n < 20 || !(last.c > last.o)) return null;
+  for (const [name, lvl] of levelsOf(ctx, dc)) {
+    if (name !== 'pdl' && n < (name === 'or15' ? 20 : 35)) continue;
+    const from = Math.max(name === 'pdl' ? 0 : (name === 'or15' ? 15 : 30), n - 9);
+    let k = -1;
+    for (let j = from; j < n - 1; j++) if (rth[j].l < lvl - 0.1 * a5) { k = j; break; }
+    if (k < 0 || !(last.c > lvl)) continue;
+    if (rth.slice(k, n - 1).some((b) => b.c > lvl)) continue; // not the first reclaim
+    const lowK = Math.min(...rth.slice(k).map((b) => b.l));
+    const st = S('SWEEP', last.h + 0.01, lowK - 0.1 * a5, ctx);
+    st.lvl = name;
+    return st;
+  }
+  return null;
+}
+
+// How recently each level was swept and reclaimed before this signal (bars ago), else null.
+function sweepFeat(ctx, dc) {
+  const { rth, a5, last } = ctx;
+  const n = rth.length, out = {};
+  for (const [name, lvl] of levelsOf(ctx, dc)) {
+    const start = name === 'pdl' ? 0 : (name === 'or15' ? 15 : 30);
+    let k = -1;
+    for (let j = n - 2; j >= Math.max(start, n - 60); j--) if (rth[j].l < lvl - 0.1 * a5) { k = j; break; }
+    out[name] = k >= 0 && last.c > lvl ? n - 1 - k : null;
+  }
+  return out;
+}
+
+// What the price did after the plan stop was hit: [minutes to stop, best high in R vs entry within 30 min, within 60 min].
+function afterStop(bars, fillAt, p, flatMs) {
+  let j = -1;
+  for (let x = 0; x < bars.length; x++) if (ms(bars[x].t) >= fillAt && bars[x].l <= p.stop) { j = x; break; }
+  if (j < 0) return null;
+  const tj = ms(bars[j].t);
+  let h30 = null, h60 = null;
+  for (let x = j + 1; x < bars.length; x++) {
+    const t = ms(bars[x].t);
+    if (t >= flatMs || t - tj > 60 * 60000) break;
+    if (t - tj <= 30 * 60000) h30 = h30 == null ? bars[x].h : Math.max(h30, bars[x].h);
+    h60 = h60 == null ? bars[x].h : Math.max(h60, bars[x].h);
+  }
+  const r = (h) => (h == null ? null : +((h - p.entry) / p.R).toFixed(2));
+  return [Math.round((tj - fillAt) / 60000), r(h30), r(h60)];
 }
 
 // Fixed-target exit: stop first when one bar touches both; time stop and flat at the bar open.
@@ -163,7 +225,7 @@ async function labDay(sess, env) {
         if (tc >= tenMs) { fams.push('base10'); if (st.ext <= 1.0) fams.push('base10x'); }
         cands.push({ setup: st, fams });
       }
-      for (const [fam, st] of [['orb30', orb30(ctx)], ['vwappb', vwapPullback(ctx, dc)], ['dip', dipBuy(ctx)], ['late', lateHod(ctx, rvol)]]) if (st) cands.push({ setup: st, fams: [fam] });
+      for (const [fam, st] of [['orb30', orb30(ctx)], ['vwappb', vwapPullback(ctx, dc)], ['dip', dipBuy(ctx)], ['late', lateHod(ctx, rvol)], ['sweep', sweepReclaim(ctx, dc)]]) if (st) cands.push({ setup: st, fams: [fam] });
       if (!cands.length) continue;
       let sc = 0;
       scanTimes.forEach((T, k) => { if (T <= tc && ser[k]) sc = ser[k].score; });
@@ -224,6 +286,7 @@ async function labDay(sess, env) {
             w1: wide(Math.max(p.R, ctx.a5)), w2: wide(Math.max(p.R, 0.01 * p.entry)),
             g: grid(),
             cf: confirm(),
+            sw: sweepFeat(ctx, dc), aft: afterStop(bars, fillAt, p, flatMs), lv: s0.lvl || null,
           });
         }
         if (!todo.length || fails.length) continue;

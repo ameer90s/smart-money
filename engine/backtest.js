@@ -32,7 +32,7 @@ export function dailyContext(daily, day) {
   const prev = (daily || []).filter((b) => b.t.slice(0, 10) < day);
   if (prev.length < 5) return null;
   const last = prev[prev.length - 1];
-  return { pc: last.c, pdh: last.h, atrD: atr(prev.slice(-15), 14), avgVol: mean(prev.slice(-20).map((b) => b.v)) };
+  return { pc: last.c, pdh: last.h, pdl: last.l, atrD: atr(prev.slice(-15), 14), avgVol: mean(prev.slice(-20).map((b) => b.v)) };
 }
 
 // Live-style scan features and score for one stock at each scan time, from closed minutes only.
