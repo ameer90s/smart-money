@@ -158,6 +158,24 @@ function holdSim(bars, fillAt, p, flatMs) {
   return [+closeR.toFixed(3), +trailR.toFixed(3), +((hh - p.entry) / R).toFixed(2), +((lo - p.entry) / R).toFixed(2)];
 }
 
+
+function emaLast(vals, n) { let e = vals[0]; const k = 2 / (n + 1); for (let i = 1; i < vals.length; i++) e = vals[i] * k + e * (1 - k); return e; }
+// Moving-average stack as a string, one char per link: price>EMA9, EMA9>EMA20, EMA20>EMA50, EMA50>EMA100, EMA100>EMA200
+// on today's 1-minute closes ('1' up, '0' not, '-' not enough bars yet).
+export function emaAlign(closes) {
+  const n = closes.length, P = [9, 20, 50, 100, 200];
+  const e = P.map((x) => (n >= x ? emaLast(closes, x) : null));
+  const c = closes[n - 1];
+  const link = (a, b) => (a == null || b == null ? '-' : a > b ? '1' : '0');
+  return link(c, e[0]) + link(e[0], e[1]) + link(e[1], e[2]) + link(e[2], e[3]) + link(e[3], e[4]);
+}
+// Same stack on daily closes before this day (EMA 20/50/100/200): '1' = price above that EMA, '-' = history too short.
+export function dailyAlign(dailyBars, day, price) {
+  const cl = (dailyBars || []).filter((b) => b.t.slice(0, 10) < day).map((b) => b.c);
+  return [20, 50, 100, 200].map((x) => (cl.length >= x ? (price > emaLast(cl, x) ? '1' : '0') : '-')).join('');
+}
+const IP_STOPS = [0.1, 0.2, 0.5, 1];
+
 // Fixed-target exit: stop first when one bar touches both; time stop and flat at the bar open.
 export function simFixed(bars, fromMs, entry, stop, target, timeStopMin, flatMs) {
   const R = entry - stop;
@@ -204,6 +222,17 @@ async function labDay(sess, env) {
   const sectorRelAt = (etf) => (T) => { const k = `${etf}|${T}`; if (!(k in rel)) rel[k] = etf && mk[etf] ? chgAt(mk[etf], pcOf(etf), T) - chgAt(spy, spyPc, T) : 0; return rel[k]; };
 
   const series = {}, keep = {}, dcs = {};
+  // Opening-range breakout on the most active stocks (published stocks-in-play variant, long only): rank by the first 5 minutes'
+  // volume against the usual volume at that time, then buy a break of the 5-minute high when it closed green, hold to the flat time.
+  const ipPool = [];
+  const ipCollect = (s, bs, dc, om) => {
+    const f = bs.findIndex((b) => ms(b.t) >= om);
+    if (f < 0 || bs.length < f + 6 || !(dc.pc > 5) || !(dc.atrD > 0.5) || !(dc.avgVol > 0)) return;
+    const o5 = bs.slice(f, f + 5);
+    const v5 = o5.reduce((a, b) => a + b.v, 0);
+    const r5 = v5 / (dc.avgVol * volumeShare(5));
+    if (r5 > 1) ipPool.push({ s, r5, f, bars: bs, orh: Math.max(...o5.map((b) => b.h)), green: o5[4].c > o5[0].o, dc });
+  };
   for (let i = 0; i < syms.length; i += CHUNK) {
     const part = syms.slice(i, i + CHUNK);
     const bars = await alpaca.bars(part, { timeframe: '1Min', start: rthStart, end: rthEnd, feed: 'sip' });
@@ -213,9 +242,26 @@ async function labDay(sess, env) {
       const rec = recordOf(s);
       const ser = scoreSeries(bars[s], dc, openMs, scanTimes, sectorRelAt(rec && rec.sector !== 'SPY' ? rec.sector : null));
       series[s] = ser; dcs[s] = dc;
+      ipCollect(s, bars[s], dc, openMs);
       if (ser.some((f) => f && f.score >= IN_PLAY)) keep[s] = bars[s];
     }
   }
+  ipPool.sort((a, b) => b.r5 - a.r5);
+  ipPool.slice(0, 20).forEach((c, rank) => {
+    if (!c.green) return;
+    const trig = c.orh + 0.01;
+    let fillIdx = -1;
+    for (let j = c.f + 5; j < c.bars.length; j++) { if (ms(c.bars[j].t) >= flatMs) break; if (c.bars[j].h >= trig) { fillIdx = j; break; } }
+    if (fillIdx < 0) return;
+    const entry = Math.max(trig, c.bars[fillIdx].o), fillAt = ms(c.bars[fillIdx].t);
+    const g = {};
+    for (const m of IP_STOPS) {
+      const Rm = m * c.dc.atrD;
+      if (!(Rm > 0 && entry - Rm > 0)) continue;
+      g[m] = [+simFixed(c.bars, fillAt, entry, entry - Rm, entry + 1000 * Rm, 100000, flatMs).toFixed(3), +Rm.toFixed(4)];
+    }
+    env.ipRows.push({ d: day, s: c.s, rank: rank + 1, r5: +c.r5.toFixed(2), e: +entry.toFixed(4), atrD: +c.dc.atrD.toFixed(4), sp: estSpread(entry, env.advOf[c.s]), et: +(ny(fillAt).min / 60).toFixed(2), chg: +((entry / c.dc.pc - 1) * 100).toFixed(2), g });
+  });
   const windows = simulateWatch(series, scanTimes, cfg, flatMs);
   let trades = 0;
   for (const s of Object.keys(windows)) {
@@ -308,6 +354,7 @@ async function labDay(sess, env) {
             g: grid(),
             cf: confirm(),
             hd: holdSim(bars, fillAt, p, flatMs), gap: +((bars[first].o / dc.pc - 1) * 100).toFixed(2), rs: +(((ctx.last.c / dc.pc - 1) * 100) - chgAt(spy, spyPc, fillAt)).toFixed(2),
+            ea: emaAlign(bars.slice(first, i + 1).map((b) => b.c)), ed: dailyAlign(daily[s], day, ctx.last.c),
             sw: sweepFeat(ctx, dc), aft: afterStop(bars, fillAt, p, flatMs), lv: s0.lvl || null,
           });
         }
@@ -332,7 +379,7 @@ export async function runLab(universe, cfg, { days = 90, testDays = 30, budgetMs
   const cal = await alpaca.calendar(addDays(today, -Math.ceil(days * 1.6) - 7), addDays(today, -1));
   const sessions = cal.filter((c) => c.date < today).slice(-days);
   const testSet = new Set(sessions.slice(-testDays).map((c) => c.date));
-  const daily = await alpaca.bars([...syms, 'SPY', ...SECTOR_ETFS], { timeframe: '1Day', start: isoNy(addDays(sessions[0].date, -45), '00:00'), end: isoNy(sessions[sessions.length - 1].date, '20:00'), feed: 'sip' });
+  const daily = await alpaca.bars([...syms, 'SPY', ...SECTOR_ETFS], { timeframe: '1Day', start: isoNy(addDays(sessions[0].date, -330), '00:00'), end: isoNy(sessions[sessions.length - 1].date, '20:00'), feed: 'sip' });
 
   const stats = {};
   const get = (key) => (stats[key] = stats[key] || { train: blank(), test: blank(), all: blank(), regime: {}, state: {}, tod: {}, score: {}, type: {}, month: {} });
@@ -343,10 +390,11 @@ export async function runLab(universe, cfg, { days = 90, testDays = 30, budgetMs
   };
   const perDay = [];
   const rows = [];
+  const ipRows = [];
   for (const sess of sessions.slice().reverse()) { // newest first, so a cut-off still covers the test set
     if (Date.now() - t0 > budgetMs) { warn('lab', 'time budget reached'); break; }
     try {
-      const r = await labDay(sess, { syms, daily, cfg, record, advOf, rows });
+      const r = await labDay(sess, { syms, daily, cfg, record, advOf, rows, ipRows });
       perDay.push({ day: sess.date, ...r });
       log(`lab ${sess.date}: ${r.inPlay} in play, ${r.watched} watched, ${r.trades} trades`);
     } catch (e) { warn(`lab ${sess.date}`, e); }
@@ -363,6 +411,7 @@ export async function runLab(universe, cfg, { days = 90, testDays = 30, budgetMs
   };
   writeJSON('lab/latest.json', out);
   writeJSON('lab/trades-latest.json', { at: out.at, testFrom: out.testFrom, costs: out.costs, rows });
+  writeJSON('lab/orbip-latest.json', { at: out.at, testFrom: out.testFrom, costs: out.costs, stops: IP_STOPS, rows: ipRows });
   writeJSON(`lab/${today}-${ny().hm.replace(':', '')}.json`, out);
   log(`lab: ${perDay.length} sessions, ${variants.length} variants in ${out.minutes} min`);
   return out;

@@ -69,6 +69,19 @@ try {
       assert.ok(typeof r.gap === 'number' && typeof r.rs === 'number');
     }
   });
+  await t('moving-average stack strings and the stocks-in-play breakout file', async () => {
+    const { emaAlign, dailyAlign } = await import('../engine/lab.js');
+    const up = Array.from({ length: 60 }, (_, i) => 10 + i * 0.1);
+    assert.equal(emaAlign(up), '111' + '--'.slice(0, 0) + '--'.replace('--', '--').slice(0, 2));
+    assert.equal(emaAlign([...up].reverse()), '000--');
+    const days = Array.from({ length: 30 }, (_, i) => ({ t: `2026-09-${String(i % 28 + 1).padStart(2, '0')}T04:00:00Z`.replace('2026-09', i < 28 ? '2026-09' : '2026-10'), c: 10 + i }));
+    assert.equal(dailyAlign(days, '2026-11-01', 100).slice(0, 1), '1');
+    assert.ok(dailyAlign(days, '2026-11-01', 100).endsWith('---'));
+    const ip = JSON.parse(fs.readFileSync(path.join(dir, 'lab/orbip-latest.json'), 'utf8'));
+    assert.ok(Array.isArray(ip.rows) && ip.stops.length === 4);
+    for (const r of ip.rows) { assert.ok(r.rank >= 1 && r.rank <= 20 && r.r5 > 1); for (const [, v] of Object.entries(r.g)) assert.ok(v[0] >= -1.01 && v[1] > 0); }
+    for (const r of JSON.parse(fs.readFileSync(path.join(dir, 'lab/trades-latest.json'), 'utf8')).rows) assert.ok(/^[01-]{5}$/.test(r.ea) && /^[01-]{4}$/.test(r.ed));
+  });
   await t('sweepReclaim buys the first close back above a swept level, stop under the sweep low', async () => {
     const { sweepReclaim } = await import('../engine/lab.js');
     const bar = (o, h, l, c) => ({ o, h, l, c, v: 1000 });
