@@ -141,7 +141,7 @@ function afterStop(bars, fillAt, p, flatMs) {
 // Longer holds: stop only (no target) until the flat time. 'close' keeps the plan stop; 'trail' trails the high by 1R once +1R was reached.
 // Returns [R held to close, R with trailing stop, best excursion in R, worst excursion in R].
 function holdSim(bars, fillAt, p, flatMs) {
-  const R = p.R;
+  const R = p.entry - p.stop; // same definition as simFixed
   let hh = p.entry, lo = p.entry, lastC = p.entry, closeR = null, trailR = null, trailStop = p.stop, trailOn = false;
   for (const b of bars) {
     const t = ms(b.t);
