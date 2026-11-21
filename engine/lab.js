@@ -137,6 +137,27 @@ function afterStop(bars, fillAt, p, flatMs) {
   return [Math.round((tj - fillAt) / 60000), r(h30), r(h60)];
 }
 
+
+// Longer holds: stop only (no target) until the flat time. 'close' keeps the plan stop; 'trail' trails the high by 1R once +1R was reached.
+// Returns [R held to close, R with trailing stop, best excursion in R, worst excursion in R].
+function holdSim(bars, fillAt, p, flatMs) {
+  const R = p.R;
+  let hh = p.entry, lo = p.entry, lastC = p.entry, closeR = null, trailR = null, trailStop = p.stop, trailOn = false;
+  for (const b of bars) {
+    const t = ms(b.t);
+    if (t < fillAt) continue;
+    if (t >= flatMs) { if (closeR == null) closeR = (b.o - p.entry) / R; if (trailR == null) trailR = (b.o - p.entry) / R; break; }
+    if (closeR == null && b.l <= p.stop) closeR = -1;
+    if (trailR == null && b.l <= trailStop) trailR = (trailStop - p.entry) / R;
+    hh = Math.max(hh, b.h); lo = Math.min(lo, b.l); lastC = b.c;
+    if (trailR == null) { if (hh >= p.entry + R) trailOn = true; if (trailOn) trailStop = Math.max(trailStop, hh - R); }
+    if (closeR != null && trailR != null) break;
+  }
+  if (closeR == null) closeR = (lastC - p.entry) / R;
+  if (trailR == null) trailR = (lastC - p.entry) / R;
+  return [+closeR.toFixed(3), +trailR.toFixed(3), +((hh - p.entry) / R).toFixed(2), +((lo - p.entry) / R).toFixed(2)];
+}
+
 // Fixed-target exit: stop first when one bar touches both; time stop and flat at the bar open.
 export function simFixed(bars, fromMs, entry, stop, target, timeStopMin, flatMs) {
   const R = entry - stop;
@@ -286,6 +307,7 @@ async function labDay(sess, env) {
             w1: wide(Math.max(p.R, ctx.a5)), w2: wide(Math.max(p.R, 0.01 * p.entry)),
             g: grid(),
             cf: confirm(),
+            hd: holdSim(bars, fillAt, p, flatMs), gap: +((bars[first].o / dc.pc - 1) * 100).toFixed(2), rs: +(((ctx.last.c / dc.pc - 1) * 100) - chgAt(spy, spyPc, fillAt)).toFixed(2),
             sw: sweepFeat(ctx, dc), aft: afterStop(bars, fillAt, p, flatMs), lv: s0.lvl || null,
           });
         }

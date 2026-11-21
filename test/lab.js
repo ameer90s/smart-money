@@ -62,6 +62,13 @@ try {
     }
     assert.ok(rows.some((r) => r.aft), 'at least one row hit its stop');
   });
+  await t('lab rows record the hold-to-close results, the opening gap and the strength against SPY', () => {
+    const rows = JSON.parse(fs.readFileSync(path.join(dir, 'lab/trades-latest.json'), 'utf8')).rows;
+    for (const r of rows) {
+      assert.equal(r.hd.length, 4); assert.ok(r.hd[0] >= -1.01 && r.hd[1] >= -1.01, JSON.stringify(r.hd)); assert.ok(r.hd[0] >= -1.01 && r.hd[1] >= -1.01 && r.hd[2] >= r.hd[3]);
+      assert.ok(typeof r.gap === 'number' && typeof r.rs === 'number');
+    }
+  });
   await t('sweepReclaim buys the first close back above a swept level, stop under the sweep low', async () => {
     const { sweepReclaim } = await import('../engine/lab.js');
     const bar = (o, h, l, c) => ({ o, h, l, c, v: 1000 });
