@@ -30,4 +30,13 @@ t('costs are charged: round trip fee plus spread', () => assert.equal(swingStudy
 t('higher fees lower the net result', () => assert.ok(swingStudy(noise, { feePerSide: 5 }).rules.base[5].net < swingStudy(noise).rules.base[5].net));
 t('baseline excess is zero by construction', () => { const b = swingStudy(noise).rules.base[5]; assert.equal(b.testExcess, 0); assert.equal(b.trainExcess, 0); });
 t('a planted breakout drift is found as positive excess', () => { const o = swingStudy(planted); assert.ok(o.rules.brk20[3].net > o.rules.base[3].net, JSON.stringify(o.rules.brk20[3])); });
+t('regime split and month consistency are reported when SPY is given', () => {
+  const spy = series(false).map((b, i) => ({ ...b, c: 100 + (i < 130 ? i : 260 - i) }));
+  const o = swingStudy(noise, { spy }), r = o.rules.brk20[5];
+  assert.ok(o.regime && r.up && r.down);
+  assert.equal(r.up.n + r.down.n <= r.n, true);
+  assert.ok(o.rules.base[5].monthsTotal >= 1 && r.monthsBeat <= r.monthsTotal);
+  assert.ok(r.testSe == null || r.testSe > 0);
+  assert.equal(swingStudy(noise).regime, false);
+});
 console.log(`${n} swing checks passed`);

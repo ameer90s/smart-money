@@ -20,7 +20,10 @@ function prep(bars) {
   return { atr, av, ema };
 }
 
-export function swingStudy(daily, { feePerSide = 1, capital = 1000, minPrice = 5 } = {}) {
+export function swingStudy(daily, { feePerSide = 1, capital = 1000, minPrice = 5, spy = null } = {}) {
+  // Market regime on the signal date: SPY close above its 50-day EMA ('up') or not.
+  const upDay = {};
+  if (spy && spy.length > 60) { let e = spy[0].c; spy.forEach((b, i) => { e = i === 0 ? b.c : b.c * (2 / 51) + e * (1 - 2 / 51); if (i >= 50) upDay[b.t.slice(0, 10)] = b.c > e; }); }
   const cost = ((2 * feePerSide) / capital) * 100 + SPREAD_PCT;
   const syms = Object.keys(daily).filter((s) => (daily[s] || []).length > 60);
   const info = {};
@@ -52,26 +55,39 @@ export function swingStudy(daily, { feePerSide = 1, capital = 1000, minPrice = 5
         if (!(entry > 0) || stop <= 0) continue;
         let exit = bars[i + H].c;
         for (let j = i + 1; j <= i + H; j++) if (bars[j].l <= stop) { exit = Math.min(stop, bars[j].o); break; }
-        trades[r][H].push({ d: bars[i + 1].t.slice(0, 10), net: (exit / entry - 1) * 100 - cost });
+        trades[r][H].push({ d: bars[i + 1].t.slice(0, 10), up: upDay[bars[i].t.slice(0, 10)], net: (exit / entry - 1) * 100 - cost });
         free = i + H + 1;
       }
     }
   }
   const mean = (a) => (a.length ? a.reduce((x, y) => x + y.net, 0) / a.length : null);
+  const sd = (a) => { if (a.length < 2) return null; const m = mean(a); return Math.sqrt(a.reduce((x, y) => x + (y.net - m) ** 2, 0) / (a.length - 1)); };
   const rnd = (x) => (x == null ? null : +x.toFixed(3));
-  const out = { cost: +cost.toFixed(3), split, dates: [dates[0], dates[dates.length - 1]], symbols: syms.length, rules: {} };
+  const out = { cost: +cost.toFixed(3), split, dates: [dates[0], dates[dates.length - 1]], symbols: syms.length, regime: Object.keys(upDay).length > 0, rules: {} };
+  const stats = (t, b) => {
+    const part = (arr, f) => arr.filter((x) => f(x.d));
+    const tr = part(t, (d) => d < split), te = part(t, (d) => d >= split);
+    const btr = mean(part(b, (d) => d < split)), bte = mean(part(b, (d) => d >= split));
+    const ex = (a, bm) => (mean(a) == null || bm == null ? null : mean(a) - bm);
+    const se = te.length > 1 ? sd(te) / Math.sqrt(te.length) : null;
+    // Months where the rule beat the baseline of the same month (needs 20+ trades in both).
+    const months = {}; for (const x of t) (months[x.d.slice(0, 7)] = months[x.d.slice(0, 7)] || { t: [], b: [] }).t.push(x);
+    for (const x of b) if (months[x.d.slice(0, 7)]) months[x.d.slice(0, 7)].b.push(x);
+    const ok = Object.values(months).filter((m) => m.t.length >= 20 && m.b.length >= 20);
+    return {
+      n: t.length, net: rnd(mean(t)), win: t.length ? +(t.filter((x) => x.net > 0).length / t.length).toFixed(3) : null,
+      trainN: tr.length, trainNet: rnd(mean(tr)), trainExcess: rnd(ex(tr, btr)),
+      testN: te.length, testNet: rnd(mean(te)), testExcess: rnd(ex(te, bte)), testSe: rnd(se),
+      monthsBeat: ok.filter((m) => mean(m.t) > mean(m.b)).length, monthsTotal: ok.length,
+    };
+  };
   for (const r of Object.keys(RULES)) {
     out.rules[r] = {};
     for (const H of HOLDS) {
       const t = trades[r][H], b = trades.base[H];
-      const part = (arr, f) => arr.filter((x) => f(x.d));
-      const tr = part(t, (d) => d < split), te = part(t, (d) => d >= split);
-      const btr = mean(part(b, (d) => d < split)), bte = mean(part(b, (d) => d >= split));
-      out.rules[r][H] = {
-        n: t.length, net: rnd(mean(t)), win: t.length ? +(t.filter((x) => x.net > 0).length / t.length).toFixed(3) : null,
-        trainN: tr.length, trainNet: rnd(mean(tr)), trainExcess: rnd(mean(tr) == null || btr == null ? null : mean(tr) - btr),
-        testN: te.length, testNet: rnd(mean(te)), testExcess: rnd(mean(te) == null || bte == null ? null : mean(te) - bte),
-      };
+      out.rules[r][H] = stats(t, b);
+      if (out.regime) out.rules[r][H].up = stats(t.filter((x) => x.up === true), b.filter((x) => x.up === true));
+      if (out.regime) out.rules[r][H].down = stats(t.filter((x) => x.up === false), b.filter((x) => x.up === false));
     }
   }
   return out;
