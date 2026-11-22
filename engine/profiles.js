@@ -16,6 +16,7 @@ export function matchProfile(cfg, { setup, plan, minAfterOpen, feats = {}, regim
     if (p.minRvol != null && !((feats.rvol || 0) >= p.minRvol)) continue;
     if (p.maxRvol != null && !((feats.rvol || 0) < p.maxRvol)) continue;
     if (p.minChg != null && !((feats.chg || 0) >= p.minChg)) continue;
+    if (p.minStopPct != null && !((plan.R / plan.entry) * 100 >= p.minStopPct)) continue;
     if (p.maxExt != null && !(plan.ext < p.maxExt)) continue;
     return p.id;
   }

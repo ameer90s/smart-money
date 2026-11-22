@@ -82,6 +82,11 @@ try {
     for (const r of ip.rows) { assert.ok(r.rank >= 1 && r.rank <= 20 && r.r5 > 1); for (const [, v] of Object.entries(r.g)) assert.ok(v[0] >= -1.01 && v[1] > 0); }
     for (const r of JSON.parse(fs.readFileSync(path.join(dir, 'lab/trades-latest.json'), 'utf8')).rows) assert.ok(/^[01-]{5}$/.test(r.ea) && /^[01-]{4}$/.test(r.ed));
   });
+  await t('regime ideas file is written with tagged events', () => {
+    const rg = JSON.parse(fs.readFileSync(path.join(dir, 'lab/regimes-latest.json'), 'utf8'));
+    assert.ok(Array.isArray(rg.rows));
+    for (const r of rg.rows) { assert.ok(['down', 'up', 'range'].includes(r.k)); assert.ok(r.g && Object.keys(r.g).length >= 6); assert.ok(r.c >= 0 && r.e > 0); }
+  });
   await t('sweepReclaim buys the first close back above a swept level, stop under the sweep low', async () => {
     const { sweepReclaim } = await import('../engine/lab.js');
     const bar = (o, h, l, c) => ({ o, h, l, c, v: 1000 });

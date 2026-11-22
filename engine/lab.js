@@ -4,6 +4,7 @@
 // only worth adopting if it holds up on both. Writes lab/latest.json; never touches the model.
 import { alpaca } from './alpaca.js';
 import { swingStudy } from './swing.js';
+import { downEvents, upEvents, rangeEvents } from './regimes.js';
 import { fetchNewsHistory, newsCounts } from './newshist.js';
 import { DYN_STOPS, DYN_TARGETS, DYN_CONFIRM } from './config.js';
 import { isoNy, nyToUtc, addDays, ny, hmToMin, minToHm } from './clock.js';
@@ -264,6 +265,14 @@ async function labDay(sess, env) {
     }
     env.ipRows.push({ d: day, s: c.s, rank: rank + 1, r5: +c.r5.toFixed(2), e: +entry.toFixed(4), atrD: +c.dc.atrD.toFixed(4), sp: estSpread(entry, env.advOf[c.s]), et: +(ny(fillAt).min / 60).toFixed(2), chg: +((entry / c.dc.pc - 1) * 100).toFixed(2), g });
   });
+  // Regime ideas (see regimes.js): scanned on the 100 stocks with the highest opening volume, each event tagged with the market state at entry.
+  for (const c of ipPool.slice(0, 100)) {
+    const evs = [...downEvents(c.bars, c.f, flatMs), ...upEvents(c.bars, c.f, flatMs, c.dc.pc), ...rangeEvents(c.bars, c.f, flatMs, c.dc.pc)];
+    for (const v of evs) {
+      const T = ms(c.bars[v.i].t);
+      env.regRows.push({ d: day, s: c.s, k: v.k, p: v.p, st: stateAt(spy, spyPc, T, openMs), et: +(ny(T).min / 60).toFixed(2), e: +v.e.toFixed(4), c: +((estSpread(v.e, env.advOf[c.s]) / v.e) * 100).toFixed(3), g: v.g });
+    }
+  }
   const windows = simulateWatch(series, scanTimes, cfg, flatMs);
   let trades = 0;
   for (const s of Object.keys(windows)) {
@@ -393,10 +402,11 @@ export async function runLab(universe, cfg, { days = 90, testDays = 30, budgetMs
   const perDay = [];
   const rows = [];
   const ipRows = [];
+  const regRows = [];
   for (const sess of sessions.slice().reverse()) { // newest first, so a cut-off still covers the test set
     if (Date.now() - t0 > budgetMs) { warn('lab', 'time budget reached'); break; }
     try {
-      const r = await labDay(sess, { syms, daily, cfg, record, advOf, rows, ipRows });
+      const r = await labDay(sess, { syms, daily, cfg, record, advOf, rows, ipRows, regRows });
       perDay.push({ day: sess.date, ...r });
       log(`lab ${sess.date}: ${r.inPlay} in play, ${r.watched} watched, ${r.trades} trades`);
     } catch (e) { warn(`lab ${sess.date}`, e); }
@@ -424,6 +434,7 @@ export async function runLab(universe, cfg, { days = 90, testDays = 30, budgetMs
   writeJSON('lab/latest.json', out);
   writeJSON('lab/trades-latest.json', { at: out.at, testFrom: out.testFrom, costs: out.costs, rows });
   try { writeJSON('lab/swing-latest.json', { at: out.at, ...swingStudy(Object.fromEntries(syms.map((x) => [x, daily[x] || []])), { feePerSide: cfg.feePerSide, capital: cfg.capital, spy: daily.SPY, newsAt: (sym, day) => (newsMap[sym] ? newsCounts(newsMap[sym], nyToUtc(day, '09:30'), nyToUtc(day, '09:30'))[0] : null) }) }); } catch (e) { warn('swing', e); }
+  writeJSON('lab/regimes-latest.json', { at: out.at, testFrom: out.testFrom, rows: regRows });
   writeJSON('lab/orbip-latest.json', { at: out.at, testFrom: out.testFrom, costs: out.costs, stops: IP_STOPS, rows: ipRows });
   writeJSON(`lab/${today}-${ny().hm.replace(':', '')}.json`, out);
   log(`lab: ${perDay.length} sessions, ${variants.length} variants in ${out.minutes} min`);

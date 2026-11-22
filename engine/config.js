@@ -68,6 +68,9 @@ export const DEFAULTS = {
     { id: 'VWAP-a', setup: 'VWAP', tod: [30, 120], regime: ['up'], maxExt: 1.0, maxRvol: 2, exit: 'mgmt', desc: '10:00–11:30 · السوق صاعد · قريب من VWAP (أقل من 1 ATR) · حجم أقل من ×2', lab: { train: 0.28, test: 0.59 } },
     { id: 'FLAG-a', setup: 'FLAG', regimeNot: ['down'], minChg: 5, exit: 'mgmt', desc: 'السوق مو هابط · مرتفع 5% وفوق', lab: { train: 0.07, test: 0.06 } },
     { id: 'EMA-a', setup: 'EMA', tod: [30, 1e9], maxRvol: 2, stopAtr: 1.0, exit: 'r2', desc: 'بعد 10:00 · حجم أقل من ×2 · وقف 1 ATR وفوق · هدف 2R', lab: { train: 0.04, test: 0.11 } },
+    // ORB-Plus (shadow only, 22 Nov 2026): ORB15/ORB30, day change 8%+, stop at least 1% of price. Lab net R: about -0.07 in the test period; tracked live to compare with the recommendations.
+    { id: 'ORBPLUS-15', setup: 'ORB15', minChg: 8, minStopPct: 1, exit: 'mgmt', desc: 'ORB15 · مرتفع 8% وفوق · وقف 1% من السعر وفوق', lab: { train: 0.0, test: -0.09 } },
+    { id: 'ORBPLUS-30', setup: 'ORB30', minChg: 8, minStopPct: 1, exit: 'mgmt', desc: 'ORB30 · مرتفع 8% وفوق · وقف 1% من السعر وفوق', lab: { train: 0.0, test: -0.09 } },
   ],
   allowDoubtful: false,
   useNews: true,
