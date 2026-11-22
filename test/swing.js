@@ -39,4 +39,12 @@ t('regime split and month consistency are reported when SPY is given', () => {
   assert.ok(r.testSe == null || r.testSe > 0);
   assert.equal(swingStudy(noise).regime, false);
 });
+t('news split compares stocks with and without a story the day before', () => {
+  const o = swingStudy(noise, { newsAt: (sym, d) => (d.endsWith('5') || d.endsWith('0') ? 2 : 0) });
+  assert.ok(o.news);
+  const r = o.rules.base[3];
+  assert.ok(r.withNews && r.noNews && r.withNews.n > 0 && r.noNews.n > 0);
+  assert.equal(r.withNews.n + r.noNews.n, r.n);
+  assert.equal(swingStudy(noise).news, false);
+});
 console.log(`${n} swing checks passed`);

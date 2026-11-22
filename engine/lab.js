@@ -4,6 +4,7 @@
 // only worth adopting if it holds up on both. Writes lab/latest.json; never touches the model.
 import { alpaca } from './alpaca.js';
 import { swingStudy } from './swing.js';
+import { fetchNewsHistory, newsCounts } from './newshist.js';
 import { DYN_STOPS, DYN_TARGETS, DYN_CONFIRM } from './config.js';
 import { isoNy, nyToUtc, addDays, ny, hmToMin, minToHm } from './clock.js';
 import { buildCtx, detect } from './setups.js';
@@ -356,7 +357,7 @@ async function labDay(sess, env) {
             cf: confirm(),
             hd: holdSim(bars, fillAt, p, flatMs), gap: +((bars[first].o / dc.pc - 1) * 100).toFixed(2), rs: +(((ctx.last.c / dc.pc - 1) * 100) - chgAt(spy, spyPc, fillAt)).toFixed(2),
             ea: emaAlign(bars.slice(first, i + 1).map((b) => b.c)), ed: dailyAlign(daily[s], day, ctx.last.c),
-            sw: sweepFeat(ctx, dc), aft: afterStop(bars, fillAt, p, flatMs), lv: s0.lvl || null,
+            fa: fillAt, sw: sweepFeat(ctx, dc), aft: afterStop(bars, fillAt, p, flatMs), lv: s0.lvl || null,
           });
         }
         if (!todo.length || fails.length) continue;
@@ -410,9 +411,19 @@ export async function runLab(universe, cfg, { days = 90, testDays = 30, budgetMs
     testFrom: [...testSet].sort()[0], symbols: syms.length, costs: { feePerSide: cfg.feePerSide, capital: cfg.capital }, minutes: Math.round((Date.now() - t0) / 60000),
     perDay, variants,
   };
+  // News catalyst measurement: Finnhub story timestamps for the symbols seen, rows get nw = [24h, pre-open, 60min] story counts.
+  let newsMap = {};
+  try {
+    const last = sessions[sessions.length - 1].date;
+    const order = [...new Set(rows.map((r) => r.s)), ...syms];
+    const nh = await fetchNewsHistory([...new Set(order)], addDays(last, -180), last);
+    newsMap = nh.map;
+    for (const r of rows) r.nw = newsCounts(newsMap[r.s], r.fa, nyToUtc(r.d, '09:30'));
+    writeJSON('lab/news-meta.json', { at: Date.now(), ...nh.stats, rowsCovered: rows.filter((r) => r.nw).length, rows: rows.length });
+  } catch (e) { warn('news history', e); }
   writeJSON('lab/latest.json', out);
   writeJSON('lab/trades-latest.json', { at: out.at, testFrom: out.testFrom, costs: out.costs, rows });
-  try { writeJSON('lab/swing-latest.json', { at: out.at, ...swingStudy(Object.fromEntries(syms.map((x) => [x, daily[x] || []])), { feePerSide: cfg.feePerSide, capital: cfg.capital, spy: daily.SPY }) }); } catch (e) { warn('swing', e); }
+  try { writeJSON('lab/swing-latest.json', { at: out.at, ...swingStudy(Object.fromEntries(syms.map((x) => [x, daily[x] || []])), { feePerSide: cfg.feePerSide, capital: cfg.capital, spy: daily.SPY, newsAt: (sym, day) => (newsMap[sym] ? newsCounts(newsMap[sym], nyToUtc(day, '09:30'), nyToUtc(day, '09:30'))[0] : null) }) }); } catch (e) { warn('swing', e); }
   writeJSON('lab/orbip-latest.json', { at: out.at, testFrom: out.testFrom, costs: out.costs, stops: IP_STOPS, rows: ipRows });
   writeJSON(`lab/${today}-${ny().hm.replace(':', '')}.json`, out);
   log(`lab: ${perDay.length} sessions, ${variants.length} variants in ${out.minutes} min`);

@@ -20,7 +20,7 @@ function prep(bars) {
   return { atr, av, ema };
 }
 
-export function swingStudy(daily, { feePerSide = 1, capital = 1000, minPrice = 5, spy = null } = {}) {
+export function swingStudy(daily, { feePerSide = 1, capital = 1000, minPrice = 5, spy = null, newsAt = null } = {}) {
   // Market regime on the signal date: SPY close above its 50-day EMA ('up') or not.
   const upDay = {};
   if (spy && spy.length > 60) { let e = spy[0].c; spy.forEach((b, i) => { e = i === 0 ? b.c : b.c * (2 / 51) + e * (1 - 2 / 51); if (i >= 50) upDay[b.t.slice(0, 10)] = b.c > e; }); }
@@ -55,7 +55,7 @@ export function swingStudy(daily, { feePerSide = 1, capital = 1000, minPrice = 5
         if (!(entry > 0) || stop <= 0) continue;
         let exit = bars[i + H].c;
         for (let j = i + 1; j <= i + H; j++) if (bars[j].l <= stop) { exit = Math.min(stop, bars[j].o); break; }
-        trades[r][H].push({ d: bars[i + 1].t.slice(0, 10), up: upDay[bars[i].t.slice(0, 10)], net: (exit / entry - 1) * 100 - cost });
+        trades[r][H].push({ d: bars[i + 1].t.slice(0, 10), nw: newsAt ? newsAt(s, bars[i + 1].t.slice(0, 10)) : null, up: upDay[bars[i].t.slice(0, 10)], net: (exit / entry - 1) * 100 - cost });
         free = i + H + 1;
       }
     }
@@ -63,7 +63,7 @@ export function swingStudy(daily, { feePerSide = 1, capital = 1000, minPrice = 5
   const mean = (a) => (a.length ? a.reduce((x, y) => x + y.net, 0) / a.length : null);
   const sd = (a) => { if (a.length < 2) return null; const m = mean(a); return Math.sqrt(a.reduce((x, y) => x + (y.net - m) ** 2, 0) / (a.length - 1)); };
   const rnd = (x) => (x == null ? null : +x.toFixed(3));
-  const out = { cost: +cost.toFixed(3), split, dates: [dates[0], dates[dates.length - 1]], symbols: syms.length, regime: Object.keys(upDay).length > 0, rules: {} };
+  const out = { cost: +cost.toFixed(3), split, dates: [dates[0], dates[dates.length - 1]], symbols: syms.length, regime: Object.keys(upDay).length > 0, news: !!newsAt, rules: {} };
   const stats = (t, b) => {
     const part = (arr, f) => arr.filter((x) => f(x.d));
     const tr = part(t, (d) => d < split), te = part(t, (d) => d >= split);
@@ -87,6 +87,11 @@ export function swingStudy(daily, { feePerSide = 1, capital = 1000, minPrice = 5
       const t = trades[r][H], b = trades.base[H];
       out.rules[r][H] = stats(t, b);
       if (out.regime) out.rules[r][H].up = stats(t.filter((x) => x.up === true), b.filter((x) => x.up === true));
+      if (newsAt) {
+        const known = (x) => x.nw != null;
+        out.rules[r][H].withNews = stats(t.filter((x) => known(x) && x.nw > 0), b.filter((x) => known(x) && x.nw > 0));
+        out.rules[r][H].noNews = stats(t.filter((x) => known(x) && x.nw === 0), b.filter((x) => known(x) && x.nw === 0));
+      }
       if (out.regime) out.rules[r][H].down = stats(t.filter((x) => x.up === false), b.filter((x) => x.up === false));
     }
   }
