@@ -1,1 +1,1 @@
-[{"sym":"NPK","type":"DIP","trigger":153.2,"stop":152.0446,"inplay":false,"t":1795625444117,"until":1795625624117,"outcome":"gapped","endAt":1795625444122,"price":154.495}]
+[{"sym":"NPK","type":"DIP","trigger":153.2,"stop":152.0446,"inplay":false,"t":1795625444117,"until":1795625624117,"outcome":"gapped","endAt":1795625444122,"price":154.495},{"sym":"NPK","type":"DIP","trigger":153.335,"stop":152.0594,"inplay":false,"t":1795625763517,"until":1795625943517,"outcome":"gapped","endAt":1795625763521,"price":154.495}]
