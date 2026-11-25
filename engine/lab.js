@@ -5,6 +5,7 @@
 import { alpaca } from './alpaca.js';
 import { swingStudy } from './swing.js';
 import { downEvents, upEvents, rangeEvents } from './regimes.js';
+import { sweepArms } from './sweepentry.js';
 import { fetchNewsHistory, newsCounts } from './newshist.js';
 import { DYN_STOPS, DYN_TARGETS, DYN_CONFIRM } from './config.js';
 import { isoNy, nyToUtc, addDays, ny, hmToMin, minToHm } from './clock.js';
@@ -296,6 +297,12 @@ async function labDay(sess, env) {
       const ctx = buildCtx(bars.slice(0, i + 1), openMs, { pdh: dc.pdh, atrD: dc.atrD });
       if (!ctx) continue;
       const rvol = dc.avgVol > 0 ? cumV / (dc.avgVol * volumeShare(Math.max(1, ctx.minAfterOpen))) : null;
+      // Sweep entry arms (measurement only): reclaim entry vs resting buys under the sweep low, one event per stock, day and level.
+      const swSt = sweepReclaim(ctx, dc);
+      if (swSt && !used.has(`sw|${swSt.lvl}`)) {
+        used.add(`sw|${swSt.lvl}`);
+        env.swRows.push({ d: day, s, lv: swSt.lvl, e: +swSt.trigger.toFixed(4), a5: +ctx.a5.toFixed(4), sp: spread(swSt.trigger), st: stateAt(spy, spyPc, tc, openMs), et: +(ny(tc).min / 60).toFixed(2), arms: sweepArms(bars, i, swSt, ctx.a5, { timeStopMin: cfg.timeStopMin, flatMs, simFixed }) });
+      }
       const cands = [];
       for (const st of detect(ctx)) {
         if (st.type === 'DIP') continue; // measured as its own family below
@@ -403,10 +410,11 @@ export async function runLab(universe, cfg, { days = 90, testDays = 30, budgetMs
   const rows = [];
   const ipRows = [];
   const regRows = [];
+  const swRows = [];
   for (const sess of sessions.slice().reverse()) { // newest first, so a cut-off still covers the test set
     if (Date.now() - t0 > budgetMs) { warn('lab', 'time budget reached'); break; }
     try {
-      const r = await labDay(sess, { syms, daily, cfg, record, advOf, rows, ipRows, regRows });
+      const r = await labDay(sess, { syms, daily, cfg, record, advOf, rows, ipRows, regRows, swRows });
       perDay.push({ day: sess.date, ...r });
       log(`lab ${sess.date}: ${r.inPlay} in play, ${r.watched} watched, ${r.trades} trades`);
     } catch (e) { warn(`lab ${sess.date}`, e); }
@@ -435,6 +443,7 @@ export async function runLab(universe, cfg, { days = 90, testDays = 30, budgetMs
   writeJSON('lab/trades-latest.json', { at: out.at, testFrom: out.testFrom, costs: out.costs, rows });
   try { writeJSON('lab/swing-latest.json', { at: out.at, ...swingStudy(Object.fromEntries(syms.map((x) => [x, daily[x] || []])), { feePerSide: cfg.feePerSide, capital: cfg.capital, spy: daily.SPY, newsAt: (sym, day) => (newsMap[sym] ? newsCounts(newsMap[sym], nyToUtc(day, '09:30'), nyToUtc(day, '09:30'))[0] : null) }) }); } catch (e) { warn('swing', e); }
   writeJSON('lab/regimes-latest.json', { at: out.at, testFrom: out.testFrom, rows: regRows });
+  writeJSON('lab/sweepentry-latest.json', { at: out.at, testFrom: out.testFrom, rows: swRows });
   writeJSON('lab/orbip-latest.json', { at: out.at, testFrom: out.testFrom, costs: out.costs, stops: IP_STOPS, rows: ipRows });
   writeJSON(`lab/${today}-${ny().hm.replace(':', '')}.json`, out);
   log(`lab: ${perDay.length} sessions, ${variants.length} variants in ${out.minutes} min`);
