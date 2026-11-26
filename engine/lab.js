@@ -6,6 +6,7 @@ import { alpaca } from './alpaca.js';
 import { swingStudy } from './swing.js';
 import { downEvents, upEvents, rangeEvents } from './regimes.js';
 import { sweepArms } from './sweepentry.js';
+import { postStopArms, stopBarIndex } from './poststop.js';
 import { fetchNewsHistory, newsCounts } from './newshist.js';
 import { DYN_STOPS, DYN_TARGETS, DYN_CONFIRM } from './config.js';
 import { isoNy, nyToUtc, addDays, ny, hmToMin, minToHm } from './clock.js';
@@ -403,7 +404,7 @@ async function labDay(sess, env) {
             cf: confirm(),
             hd: holdSim(bars, fillAt, p, flatMs), gap: +((bars[first].o / dc.pc - 1) * 100).toFixed(2), rs: +(((ctx.last.c / dc.pc - 1) * 100) - chgAt(spy, spyPc, fillAt)).toFixed(2),
             ea: emaAlign(bars.slice(first, i + 1).map((b) => b.c)), ed: dailyAlign(daily[s], day, ctx.last.c),
-            fa: fillAt, sw: sweepFeat(ctx, dc), aft: afterStop(bars, fillAt, p, flatMs), sd: stopDip(bars, fillAt, p, flatMs), lv: s0.lvl || null,
+            fa: fillAt, sw: sweepFeat(ctx, dc), aft: afterStop(bars, fillAt, p, flatMs), sd: stopDip(bars, fillAt, p, flatMs), pd: postStopArms(bars, stopBarIndex(bars, fillAt, p.stop), p.stop, ctx.a5, flatMs), lv: s0.lvl || null,
           });
         }
         if (!todo.length || fails.length) continue;
@@ -474,6 +475,7 @@ export async function runLab(universe, cfg, { days = 90, testDays = 30, budgetMs
   try { writeJSON('lab/swing-latest.json', { at: out.at, ...swingStudy(Object.fromEntries(syms.map((x) => [x, daily[x] || []])), { feePerSide: cfg.feePerSide, capital: cfg.capital, spy: daily.SPY, newsAt: (sym, day) => (newsMap[sym] ? newsCounts(newsMap[sym], nyToUtc(day, '09:30'), nyToUtc(day, '09:30'))[0] : null) }) }); } catch (e) { warn('swing', e); }
   writeJSON('lab/regimes-latest.json', { at: out.at, testFrom: out.testFrom, rows: regRows });
   writeJSON('lab/sweepentry-latest.json', { at: out.at, testFrom: out.testFrom, rows: swRows });
+  try { writeJSON('lab/poststop-latest.json', { at: out.at, testFrom: out.testFrom, k: [0.25, 0.5, 1, 1.5], rows: rows.filter((r) => r.pd).map((r) => ({ d: r.d, s: r.s, ty: r.ty, et: r.et, fa: r.fa, a5: r.a5, e: r.e, R: r.R, sp: r.sp, st: r.st, rg: r.rg, sd: r.sd, pd: r.pd })) }); } catch (e) { warn('poststop', e); }
   writeJSON('lab/orbip-latest.json', { at: out.at, testFrom: out.testFrom, costs: out.costs, stops: IP_STOPS, rows: ipRows });
   writeJSON(`lab/${today}-${ny().hm.replace(':', '')}.json`, out);
   log(`lab: ${perDay.length} sessions, ${variants.length} variants in ${out.minutes} min`);
