@@ -142,6 +142,36 @@ function afterStop(bars, fillAt, p, flatMs) {
 }
 
 
+// After the plan stop was hit: [minutes from the stop to the lowest low within 90 minutes, how far that low is below the stop in %,
+// the rebound from that low to the highest high within the next 60 minutes in %, the close 60 minutes after the stop versus the stop in %].
+export function stopDip(bars, fillAt, p, flatMs) {
+  let j = -1;
+  for (let x = 0; x < bars.length; x++) if (ms(bars[x].t) >= fillAt && bars[x].l <= p.stop) { j = x; break; }
+  if (j < 0) return null;
+  const tj = ms(bars[j].t);
+  let lowI = j, low = bars[j].l;
+  for (let x = j + 1; x < bars.length; x++) {
+    const t = ms(bars[x].t);
+    if (t >= flatMs || t - tj > 90 * 60000) break;
+    if (bars[x].l < low) { low = bars[x].l; lowI = x; }
+  }
+  const tl = ms(bars[lowI].t);
+  let hi = low, c60 = null;
+  for (let x = lowI; x < bars.length; x++) {
+    const t = ms(bars[x].t);
+    if (t >= flatMs || t - tl > 60 * 60000) break;
+    hi = Math.max(hi, bars[x].h);
+  }
+  for (let x = j; x < bars.length; x++) {
+    const t = ms(bars[x].t);
+    if (t >= flatMs) break;
+    if (t - tj <= 60 * 60000) c60 = bars[x].c; else break;
+  }
+  const pc = (a, b) => +((a / b - 1) * 100).toFixed(2);
+  return [Math.round((tl - tj) / 60000), pc(low, p.stop), pc(hi, low), c60 == null ? null : pc(c60, p.stop)];
+}
+
+
 // Longer holds: stop only (no target) until the flat time. 'close' keeps the plan stop; 'trail' trails the high by 1R once +1R was reached.
 // Returns [R held to close, R with trailing stop, best excursion in R, worst excursion in R].
 function holdSim(bars, fillAt, p, flatMs) {
@@ -373,7 +403,7 @@ async function labDay(sess, env) {
             cf: confirm(),
             hd: holdSim(bars, fillAt, p, flatMs), gap: +((bars[first].o / dc.pc - 1) * 100).toFixed(2), rs: +(((ctx.last.c / dc.pc - 1) * 100) - chgAt(spy, spyPc, fillAt)).toFixed(2),
             ea: emaAlign(bars.slice(first, i + 1).map((b) => b.c)), ed: dailyAlign(daily[s], day, ctx.last.c),
-            fa: fillAt, sw: sweepFeat(ctx, dc), aft: afterStop(bars, fillAt, p, flatMs), lv: s0.lvl || null,
+            fa: fillAt, sw: sweepFeat(ctx, dc), aft: afterStop(bars, fillAt, p, flatMs), sd: stopDip(bars, fillAt, p, flatMs), lv: s0.lvl || null,
           });
         }
         if (!todo.length || fails.length) continue;

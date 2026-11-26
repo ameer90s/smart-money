@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { sweepArms } from '../engine/sweepentry.js';
-import { simFixed } from '../engine/lab.js';
+import { simFixed, stopDip } from '../engine/lab.js';
 
 let pass = 0;
 const t = async (name, fn) => { await fn(); pass++; console.log('PASS', name); };
@@ -37,6 +37,23 @@ await t('orders are not filled after the flat time', () => {
   const bars = [bar(0, 10.0, 10.08, 9.98, 10.07), bar(1, 10.07, 10.12, 10.05, 10.1), bar(2, 10.1, 10.3, 10.0, 10.25), bar(3, 10.25, 10.3, 9.5, 9.6), bar(4, 9.6, 9.7, 9.5, 9.6)];
   const r = sweepArms(bars, 0, st, 0.1, { ...opt, flatMs: t0 + 3 * 60000 });
   assert.equal(r.B, null);
+});
+
+await t('stopDip: minutes to the lowest low after the stop, its depth, the rebound from it and the close one hour after the stop', () => {
+  const bars = [bar(0, 10.0, 10.05, 9.99, 10.02), bar(1, 10.02, 10.03, 9.89, 9.9), bar(2, 9.9, 9.92, 9.8, 9.82), bar(3, 9.82, 9.9, 9.7, 9.75), bar(4, 9.75, 9.95, 9.74, 9.9), bar(5, 9.9, 10.2, 9.88, 10.1), bar(6, 10.1, 10.3, 10.0, 10.2)];
+  const r = stopDip(bars, t0, { stop: 9.9 }, t0 + 600 * 60000);
+  assert.equal(r[0], 2, 'lowest low (9.70) is 2 minutes after the stop bar (9.89 low at minute 1)');
+  assert.equal(r[1], -2.02, 'low is 2.02% under the stop');
+  assert.equal(r[2], 6.19, 'rebound from 9.70 to the 10.30 high');
+  assert.equal(r[3], 3.03, 'close at minute 6 (10.2) vs stop 9.9');
+});
+
+await t('stopDip: no stop touched returns null; flat time cuts the search', () => {
+  const bars = [bar(0, 10.0, 10.05, 9.99, 10.02), bar(1, 10.02, 10.1, 9.95, 10.05)];
+  assert.equal(stopDip(bars, t0, { stop: 9.9 }, t0 + 600 * 60000), null);
+  const b2 = [bar(0, 10.0, 10.05, 9.85, 9.9), bar(1, 9.9, 9.95, 9.6, 9.7), bar(2, 9.7, 9.8, 9.5, 9.6)];
+  const r = stopDip(b2, t0, { stop: 9.9 }, t0 + 2 * 60000);
+  assert.equal(r[0], 1, 'the bar at the flat time is not used');
 });
 
 console.log(`${pass} sweepentry tests PASS`);
